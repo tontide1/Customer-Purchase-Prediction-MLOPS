@@ -1,49 +1,30 @@
+# Week 1: Data Foundation Pipeline
+# This dvc.yaml includes only stages that can be executed in Week 1.
+# Week 2+ stages (session_split, gold, train, etc.) are postponed until their dependencies are ready.
+
 stages:
   bronze:
+    desc: "Transform raw CSV to bronze parquet (event_time → source_event_time)"
     cmd: python training/src/bronze.py --input data/raw --output data/bronze/events.parquet
     deps:
       - training/src/bronze.py
+      - training/src/config.py
+      - shared/constants.py
+      - shared/schemas.py
       - data/raw
     outs:
-      - data/bronze/events.parquet
+      - data/bronze/events.parquet:
+          desc: "Validated, immutable bronze artifact with source_event_time"
 
   silver:
+    desc: "Clean and sort bronze data to silver parquet"
     cmd: python training/src/silver.py --input data/bronze/events.parquet --output data/silver/events.parquet
     deps:
       - training/src/silver.py
+      - training/src/config.py
+      - shared/constants.py
+      - shared/schemas.py
       - data/bronze/events.parquet
     outs:
-      - data/silver/events.parquet
-
-  session_split:
-    cmd: python training/src/session_split.py --input data/silver/events.parquet --output data/gold/session_split_map.parquet
-    deps:
-      - training/src/session_split.py
-      - data/silver/events.parquet
-    outs:
-      - data/gold/session_split_map.parquet
-
-  gold:
-    cmd: python training/src/gold.py --input data/silver/events.parquet --split-map data/gold/session_split_map.parquet --output-dir data/gold
-    deps:
-      - training/src/gold.py
-      - data/silver/events.parquet
-      - data/gold/session_split_map.parquet
-    outs:
-      - data/gold/train_snapshots.parquet
-      - data/gold/val_snapshots.parquet
-      - data/gold/test_snapshots.parquet
-
-  train:
-    cmd: python training/src/train.py --gold-dir data/gold
-    deps:
-      - training/src/train.py
-      - training/src/model_validation.py
-      - training/src/evaluate.py
-      - training/src/explainability.py
-      - data/gold/train_snapshots.parquet
-      - data/gold/val_snapshots.parquet
-      - data/gold/test_snapshots.parquet
-      - data/gold/session_split_map.parquet
-    outs:
-      - models/latest
+      - data/silver/events.parquet:
+          desc: "Clean, deduplicated, deterministically sorted data"
