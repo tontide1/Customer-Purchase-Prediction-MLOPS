@@ -1,0 +1,4 @@
+# Ignore runtime caches and logs from DVC scans
+**/__pycache__/
+**/*.log
+**/.ipynb_checkpoints/
