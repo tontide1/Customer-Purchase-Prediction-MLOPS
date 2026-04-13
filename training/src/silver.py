@@ -32,6 +32,16 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+SILVER_STRING_COLUMNS = [
+    "event_type",
+    "product_id",
+    "user_id",
+    "user_session",
+    "category_code",
+    "brand",
+]
+
+
 def read_bronze_parquet(bronze_path: str) -> pd.DataFrame:
     """
     Read bronze parquet artifact.
@@ -51,6 +61,31 @@ def read_bronze_parquet(bronze_path: str) -> pd.DataFrame:
     table = pq.read_table(bronze_path)
     df = table.to_pandas()
     logger.info(f"  ✓ Read {len(df)} rows")
+
+    return df
+
+
+def enforce_silver_dtypes(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Enforce dtypes compatible with SILVER_SCHEMA.
+
+    Args:
+        df: Input DataFrame
+
+    Returns:
+        DataFrame with normalized dtypes
+    """
+    if constants.FIELD_SOURCE_EVENT_TIME in df.columns:
+        df[constants.FIELD_SOURCE_EVENT_TIME] = pd.to_datetime(
+            df[constants.FIELD_SOURCE_EVENT_TIME], errors="coerce"
+        )
+
+    for column in SILVER_STRING_COLUMNS:
+        if column in df.columns:
+            df[column] = df[column].astype("string")
+
+    if "price" in df.columns:
+        df["price"] = pd.to_numeric(df["price"], errors="coerce")
 
     return df
 
@@ -136,6 +171,10 @@ def write_silver_parquet(df: pd.DataFrame, output_path: str) -> None:
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Reorder columns to match schema order
+    silver_fields = [field.name for field in schemas.SILVER_SCHEMA]
+    df = df[silver_fields]
+
     # Convert to PyArrow table with schema
     table = pa.Table.from_pandas(df, schema=schemas.SILVER_SCHEMA)
 
@@ -172,6 +211,9 @@ def main():
         df = read_bronze_parquet(args.input)
         initial_count = len(df)
         total_rejected = 0
+
+        # Normalize dtypes before validation and write
+        df = enforce_silver_dtypes(df)
 
         # Check required fields
         logger.info("\n2. Checking required fields...")
