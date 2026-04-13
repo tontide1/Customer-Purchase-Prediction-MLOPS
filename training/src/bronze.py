@@ -33,6 +33,25 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+RAW_CSV_DTYPES = {
+    "event_type": "string",
+    "product_id": "string",
+    "user_id": "string",
+    "user_session": "string",
+    "category_code": "string",
+    "brand": "string",
+}
+
+BRONZE_STRING_COLUMNS = [
+    "event_type",
+    "product_id",
+    "user_id",
+    "user_session",
+    "category_code",
+    "brand",
+]
+
+
 def read_raw_csvs(raw_dir: str) -> pd.DataFrame:
     """
     Read all CSV files from raw directory and concatenate.
@@ -63,9 +82,13 @@ def read_raw_csvs(raw_dir: str) -> pd.DataFrame:
         logger.info(f"Reading {file_path.name}...")
         try:
             if str(file_path).endswith(".gz"):
-                df = pd.read_csv(file_path, compression="gzip")
+                df = pd.read_csv(
+                    file_path,
+                    compression="gzip",
+                    dtype=RAW_CSV_DTYPES,
+                )
             else:
-                df = pd.read_csv(file_path)
+                df = pd.read_csv(file_path, dtype=RAW_CSV_DTYPES)
             dfs.append(df)
             logger.info(f"  ✓ Read {len(df)} rows from {file_path.name}")
         except Exception as e:
@@ -134,8 +157,16 @@ def transform_to_bronze(df: pd.DataFrame) -> pd.DataFrame:
         columns={constants.FIELD_EVENT_TIME: constants.FIELD_SOURCE_EVENT_TIME}
     )
 
+    # Enforce dtypes compatible with BRONZE_SCHEMA
+    for column in BRONZE_STRING_COLUMNS:
+        if column in df.columns:
+            df[column] = df[column].astype("string")
+
+    if "price" in df.columns:
+        df["price"] = pd.to_numeric(df["price"], errors="coerce")
+
     # Select only schema fields (in order)
-    bronze_fields = list(schemas.get_bronze_fields())
+    bronze_fields = [field.name for field in schemas.BRONZE_SCHEMA]
     df = df[bronze_fields]
 
     return df
