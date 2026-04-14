@@ -1,59 +1,44 @@
 # AGENTS
 
-## Enviroment Python
-- Use command "conda activate MLOPS" for python enviroment
-- Present, the version python is 3.11.15
+## What is real in this repo (today)
+- Treat `docs/BLUEPRINT/*.md` and `BLUEPRINT.md` as target-state design; many snippets are illustrative, not executable.
+- Executable Week 1 data foundation exists in:
+  - `training/src/config.py`, `training/src/bronze.py`, `training/src/silver.py`
+  - `shared/constants.py`, `shared/schemas.py`
+  - `training/tests/test_data_lake.py`
+  - `dvc.yaml` (only `bronze` and `silver` stages)
+- Infra scaffold currently implemented: `docker-compose.yml` + `infra/minio/init-bucket.sh` (MinIO + bucket init only).
+- There is no repo-level `pyproject.toml`, `requirements*.txt`, `Makefile`, pre-commit config, or CI workflow.
 
-## Repo Reality (verify before acting)
-- This repository is still blueprint-first: most `docs/BLUEPRINT/*.md` snippets are target-state examples, not implemented code.
-- Currently present executable/scaffold files are limited to `docker-compose.yml` (MinIO + bucket init only), `dvc.yaml`, `infra/minio/init-bucket.sh`, `.env.example`, datasets, and notebooks.
-- There is no repo-level `pyproject.toml`, `requirements*.txt`, `Makefile`, or CI workflow; do not invent lint/typecheck/test commands.
+## Environment and command baseline
+- Preferred Python env: `conda activate MLOPS` (expected Python 3.11.x in this env).
+- If `python` is unavailable outside conda, use `python3` for scripts.
+- Start local object storage: `docker compose up -d` (MinIO only).
+- Quick health check: `docker compose ps` (MinIO ports `9000` API, `9001` console).
+- Week 1 pipeline commands:
+  - `python training/src/bronze.py --input data/raw --output data/bronze/events.parquet`
+  - `python training/src/silver.py --input data/bronze/events.parquet --output data/silver/events.parquet`
+  - `dvc repro` runs only `bronze` -> `silver` per current `dvc.yaml`.
 
-## Commands That Are Safe To Assume
-- `docker compose up -d` from repo root starts the MinIO scaffold only.
-- `docker compose ps` is the quick health check; MinIO uses ports `9000` (S3 API) and `9001` (console).
-- `dvc.yaml` exists, but `dvc repro` stages depend on `training/src/*.py` scripts that are not fully implemented yet.
+## Data pipeline gotchas that cause real failures
+- Keep schema field order from `schemas.BRONZE_SCHEMA` / `schemas.SILVER_SCHEMA` when selecting columns; do not build column order from sets.
+- Bronze write path is strict on dtypes (PyArrow schema cast): ensure IDs/categorical fields stay string-like before `pa.Table.from_pandas(...)`.
+- Bronze input reader supports both `*.csv` and `*.csv.gz` under `data/raw/`; avoid hard-coding dataset filenames.
+- Raw layer contract: keep source `event_time`; internal layers must use `source_event_time`.
 
-## High-Risk Contracts (Do Not Drift)
+## Contracts to preserve when touching architecture/docs
 - Canonical `event_id`: `hash(f"{user_session}|{source_event_time}|{event_type}|{product_id}|{user_id}")`.
-- Validation gate is fail-closed except first deployment; manual override requires all audit fields: `override_by`, `override_reason`, `override_time`.
+- Validation gate is fail-closed except first deployment; manual override requires `override_by`, `override_reason`, `override_time`.
 - `/predict` may fallback; `/explain` must return `503` when explainer is unavailable.
 - Fallback predictions must not be cached and must be excluded from model-quality metrics.
-- Keep online evaluation split by `evaluation_mode` (`demo_replay` vs `offline_backfill`); never merge them into one metric series.
-- DVC+MinIO is source of truth for data artifacts (`raw/bronze/silver/gold`); MLflow is source of truth for model registry/experiment metrics.
-- Least privilege: prediction API config must not contain DVC/MinIO credentials.
+- Keep online evaluation separated by `evaluation_mode` (`demo_replay` vs `offline_backfill`); never merge metric series.
+- Least privilege rule: prediction API runtime config must not include DVC/MinIO credentials.
 
-## Editing Guardrails
-- Prefer updating executable sources (`docker-compose.yml`, `dvc.yaml`, scripts) before prose if they conflict.
-- When changing data/serving contracts, update the matching docs together: `01_OVERVIEW.md`, `02_ARCHITECTURE.md`, `04_PIPELINES.md`, `05_PROJECT_STRUCTURE.md`, `07_TESTING.md`.
-
-## Karpathy Guidelines
-
-### 1. Think Before Coding
-- State assumptions explicitly. If uncertain, ask.
-- Present multiple interpretations when ambiguous; don't pick silently.
-- Push back when a simpler approach exists.
-- Stop and ask when something is unclear.
-
-### 2. Simplicity First
-- Minimum code that solves the problem. No speculative abstractions.
-- No features beyond what was asked.
-- No "flexibility" that wasn't requested.
-- If 200 lines could be 50, rewrite it.
-
-### 3. Surgical Changes
-- Touch only what you must.
-- Don't "improve" adjacent code or refactor unrelated broken things.
-- Match existing style.
-- Remove only orphans your changes created.
-
-### 4. Goal-Driven Execution
-- Transform tasks into verifiable goals.
-- "Add validation" → "Write tests for invalid inputs, then make them pass"
-- "Fix the bug" → "Write a test that reproduces it, then fix"
-- For multi-step tasks: state plan with verification checkpoints.
-
-## Guardrails for future edits
-- Keep reject reasons machine-readable and sourced from `RejectReasonCode`.
-- Do not treat blueprint examples as already implemented services; verify against actual files before coding.
-- There is currently no repo-level `pyproject.toml`, `requirements*.txt`, CI workflow, or `Makefile`; do not assume lint/typecheck commands exist.
+## Editing policy for agents
+- Prefer executable source of truth (`dvc.yaml`, `training/src/*.py`, `docker-compose.yml`, scripts) over prose if they conflict.
+- When changing data/serving contracts, sync these blueprint docs in the same change:
+  - `docs/BLUEPRINT/01_OVERVIEW.md`
+  - `docs/BLUEPRINT/02_ARCHITECTURE.md`
+  - `docs/BLUEPRINT/04_PIPELINES.md`
+  - `docs/BLUEPRINT/05_PROJECT_STRUCTURE.md`
+  - `docs/BLUEPRINT/07_TESTING.md`
