@@ -1,0 +1,5 @@
+[core]
+    remote = minio-local
+['remote "minio-local"']
+    url = s3://mlops-artifacts/dvc
+    endpointurl = http://localhost:9000

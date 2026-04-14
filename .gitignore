@@ -1,6 +1,5 @@
 # my ignore
 dataset/
-!.dvc
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -67,7 +66,6 @@ mlruns/
 .mlflow/
 dvc.lock
 .dvc/cache
-*.dvc
 outputs/
 models/
 experiments/
