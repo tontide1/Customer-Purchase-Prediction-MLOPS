@@ -6,7 +6,7 @@ Hệ thống Phân tích & Dự đoán Ý định Mua hàng Thời gian thực
 
 ## ⚠️ Document Status
 
-**Trạng thái:** `TARGET ARCHITECTURE` (Kiến trúc mục tiêu)
+**Trạng thái:** `FREEZE-READY` ✅ (Kiến trúc mục tiêu locked & verified)
 
 > **Lưu ý quan trọng:** Blueprint này mô tả **kiến trúc và thiết kế mục tiêu** cho hệ thống. Hiện tại, repository chứa:
 > - ✅ Dataset gốc (`dataset/*.csv.gz`)
