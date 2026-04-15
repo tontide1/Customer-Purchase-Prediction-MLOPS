@@ -5,13 +5,13 @@
 
 | Tuần | Milestone | Deliverables |
 | --- | --- | --- |
-| **1** | Data Foundation | `data/raw/`, `data/bronze/`, `data/silver/`, config paths, timestamp contract (`source_event_time`, `replay_time`, `prediction_time`), DVC init + MinIO remote setup |
-| **2** | Training Pipeline | Session-boundary split, snapshot dataset builder, 10-minute horizon labeling, `data/gold/` artifacts, feature engineering, **multi-model training (XGBoost, LightGBM, Random Forest)**, model comparison & auto-selection, SHAP analysis, MLflow integration, **Data Lineage**, **Model Validation Gate** |
+| **1** | Data Foundation | `data/raw/`, chunked + partitioned `data/bronze/`, partition-aware `data/silver/`, config paths theo directory semantics, timestamp contract (`source_event_time`, `replay_time`, `prediction_time`), DVC init + MinIO remote setup |
+| **2** | Training Pipeline | Global session index, session-boundary split, snapshot dataset builder, 10-minute horizon labeling, `data/gold/` artifacts, feature engineering, **multi-model training (XGBoost, LightGBM, Random Forest)**, model comparison & auto-selection, SHAP analysis, MLflow integration, **Data Lineage**, **Model Validation Gate** |
 | **3** | Stream Processing | Quix Streams processor, session-scoped Redis feature store, Kafka topics, timestamp preservation, **cache invalidation logic** |
 | **4** | Serving & API | FastAPI (predict + explain + health) theo `user_session`, security (API Key + rate limit), **Model Hot-Reload**, **Prediction Caching**, unit tests |
 | **5** | Frontend & Dashboard | Streamlit User App + Admin Dashboard (tích hợp SHAP visualization) |
 | **6** | Monitoring & CI | Prometheus + Grafana (latency panels + **6 alert rules + Webhook**), GitHub Actions (**pytest-cov ≥ 70%**), integration tests cho snapshot target và session-scoped serving |
-| **7** | Polish & Demo | Demo script rehearsal (11 bước), documentation, edge case testing |
+| **7** | Polish & Demo | Demo script rehearsal (11 bước), documentation, edge case testing, bronze memory benchmark review |
 
 ---
 
@@ -20,52 +20,47 @@
 ### Docs Update Plan
 
 **`BLUEPRINT.md`**
-* Thêm summary ngắn về data lake layers `raw/bronze/silver/gold`.
-* Giữ wording tổng quan, không đi sâu vào implementation.
+* Thêm summary ngắn về one data lake, multiple usage windows.
+* Giữ wording tổng quan, không đi sâu vào implementation details của partitions.
 
 **`docs/BLUEPRINT/01_OVERVIEW.md`**
-* Khóa 4 lớp dữ liệu và nguyên tắc split theo `user_session` boundary tại silver layer.
-* Bỏ mọi hard-code liên quan đến file CSV cụ thể.
+* Mô tả raw source pool gồm 7 file tháng.
+* Khóa training window, replay/demo window, và retraining flow như các usage windows khác nhau trên cùng data lake.
 * Giữ canonical contract: `user_session`, `source_event_time`, `replay_time`, `prediction_time`.
+* Khóa split policy downstream theo `session_start_time` và `user_session` boundary.
 
 **`docs/BLUEPRINT/04_PIPELINES.md`**
-* Mô tả rõ chuỗi: raw → bronze → silver → session split → gold → train.
-* Ghi output artifact của từng lớp.
-* Nhấn mạnh `user_session` chỉ được nằm trong đúng một split.
+* Mô tả rõ: raw source pool -> window selection -> bronze ingestion -> silver clean/sort -> session index -> split -> gold -> train.
+* Bronze phải là chunked/partitioned ingestion.
+* Silver phải là dataset-oriented processing, không assume single bronze file.
+* Replay dùng raw window riêng và preserve `source_event_time`.
 
 **`docs/BLUEPRINT/05_PROJECT_STRUCTURE.md`**
-* Cập nhật tree thư mục `data/raw/`, `data/bronze/`, `data/silver/`, `data/gold/`.
-* Thêm config path tương ứng trong `Settings`.
+* Cập nhật tree thư mục theo dataset directories cho bronze/silver.
+* Cập nhật config example theo directory semantics.
+* Thêm training window và replay window vào config example.
 
 **`docs/BLUEPRINT/07_TESTING.md`**
-* Thêm test lớp dữ liệu: raw→bronze, bronze→silver, silver→split, silver→gold.
-* Thêm test disjoint session boundaries.
+* Thêm test cho chunked bronze ingestion contract.
+* Thêm test cross-month session boundary.
+* Thêm test disjoint split map và window isolation.
 
 ### Code Module Plan
 
-**`training/src/config.py`**
-* Thêm `raw_data_path`, `bronze_data_path`, `silver_data_path`, `gold_data_dir`, `prediction_horizon_minutes`.
-* Thêm config DVC/MinIO (`dvc_remote_name`, `dvc_remote_url`, `s3_endpoint_url`).
-
-**`shared/schemas.py`**
-* Chuẩn hóa raw event schema và internal schemas cho bronze/silver layers.
-* Tách rõ field raw (`event_time`) và field nội bộ (`source_event_time`).
-
-**`shared/constants.py`**
-* Định nghĩa tên thư mục/layer và key prefix dùng chung giữa training, simulator, stream processor, và API.
-
 **`training/src/bronze.py`**
-* Parse raw CSV.
+* Đọc raw source pool theo file/chunk.
 * Rename `event_time -> source_event_time`.
-* Validate schema và write Parquet bronze.
+* Validate schema cơ bản.
+* Write output vào `data/bronze/` dưới dạng parquet dataset memory-safe.
 
 **`training/src/silver.py`**
-* Clean null/outlier.
-* Sort deterministic theo `user_session` + `source_event_time`.
-* Write Parquet silver.
+* Đọc bronze dataset theo partition/window.
+* Clean null/invalid values.
+* Sort theo semantics phục vụ session indexing.
+* Write output vào `data/silver/` dưới dạng parquet dataset.
 
 **`training/src/session_split.py`**
-* Build session index từ silver.
+* Build global session index từ silver layer trên training window.
 * Split theo `user_session` boundary bằng `session_start_time`.
 * Persist `session_split_map.parquet`.
 
@@ -102,7 +97,8 @@
 
 **`dvc.yaml`**
 * Định nghĩa stages `bronze`, `silver`, `session_split`, `gold`, `train`.
-* Track deps/outs để `dvc repro` deterministic.
+* Bronze và silver outputs nên là directory-based artifacts.
+* Track deps/outs để `dvc repro`, `dvc push`, `dvc pull` hoạt động với dataset lớn mà không yêu cầu load toàn bộ dữ liệu vào RAM.
 
 **`docker-compose.yml`**
 * Bổ sung service `minio` + `mc` init container.
@@ -154,10 +150,13 @@
 ### Verification Plan
 
 1. Raw/bronze/silver/gold docs phải thống nhất.
-2. Không file nào được hard-code `2019-Oct.csv`.
-3. Không split logic nào được mô tả ở snapshot boundary trước session boundary.
-4. Tests phải assert session disjointness và timestamp preservation.
-5. Event deduplication phải dùng deterministic `event_id`, test verify không update state khi trùng.
-6. Late event policy phải được test: trễ quá ngưỡng thì không cập nhật online state.
-7. Redis exact count (Set/SCARD) phải khớp với offline exact counts.
-8. `dvc repro` + `dvc push` thành công, artifacts có thể `dvc pull` lại trên máy mới.
+2. Không file nào được hard-code `2019-Oct.csv` như source duy nhất.
+3. Không phần nào còn assume `data/bronze/events.parquet` hoặc `data/silver/events.parquet` là contract chính thức.
+4. Không split logic nào được mô tả ở snapshot boundary trước session boundary.
+5. Tests phải assert session disjointness và timestamp preservation.
+6. Cross-month session phải vẫn thuộc đúng một split duy nhất.
+7. Event deduplication phải dùng deterministic `event_id`, test verify không update state khi trùng.
+8. Late event policy phải được test: trễ quá ngưỡng thì không cập nhật online state.
+9. Redis exact count (Set/SCARD) phải khớp với offline exact counts.
+10. Bronze row-count parity phải giữ nguyên khi chuyển sang chunked/partitioned materialization.
+11. `dvc repro` + `dvc push` thành công, artifacts có thể `dvc pull` lại trên máy mới.

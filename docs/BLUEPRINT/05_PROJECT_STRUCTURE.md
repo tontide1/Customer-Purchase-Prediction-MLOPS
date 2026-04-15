@@ -136,15 +136,28 @@ REAL-TIME-ECOMMERCE-INTENT-SYSTEM/
 │   ├── 2020-Mar.csv.gz
 │   └── 2020-Apr.csv.gz
 │
-└── data/                           # (PLANNED) Data lake directory (gitignored)
-    ├── raw/                        # Immutable raw CSVs (symlink từ dataset/ hoặc copy)
-    │   └── .gitkeep
-    ├── bronze/                     # Parsed schema, event_time -> source_event_time
-    │   └── .gitkeep
-    ├── silver/                     # Cleaned, sorted parquet
-    │   └── .gitkeep
+└── data/                           # Data lake directory (gitignored)
+    ├── raw/                        # Raw source pool (copy/symlink/materialized from dataset/)
+    │   ├── 2019-Oct.csv.gz
+    │   ├── 2019-Nov.csv.gz
+    │   ├── 2019-Dec.csv.gz
+    │   ├── 2020-Jan.csv.gz
+    │   ├── 2020-Feb.csv.gz
+    │   ├── 2020-Mar.csv.gz
+    │   └── 2020-Apr.csv.gz
+    ├── bronze/                     # Parsed parquet dataset, memory-safe materialization
+    │   └── year=2019/
+    │       └── month=10/
+    │           └── part-000.parquet
+    ├── silver/                     # Cleaned parquet dataset for downstream session indexing
+    │   └── year=2019/
+    │       └── month=10/
+    │           └── part-000.parquet
     └── gold/                       # Snapshot training datasets + split artifacts
-        └── .gitkeep
+        ├── train_snapshots.parquet
+        ├── val_snapshots.parquet
+        ├── test_snapshots.parquet
+        └── session_split_map.parquet
 ```
 
 ### Legend
@@ -158,14 +171,14 @@ REAL-TIME-ECOMMERCE-INTENT-SYSTEM/
 
 | Purpose | Current Path | Target Path | Ghi chú |
 |---------|--------------|------------|---------|
-| **Raw Data Input** | `dataset/*.csv.gz` | `data/raw/` | Blueprint sẽ decompress từ `dataset/` hoặc copy vào `data/raw/` |
+| **Raw Data Input** | `dataset/*.csv.gz` | `data/raw/` | `data/raw/` là raw source pool dùng cho training/replay/retraining materialization |
 | **Analysis & EDA** | `notebook/eda.ipynb` | `notebook/` hoặc `notebook-planned/` | Tái sử dụng insights từ EDA hiện có |
 | **Feature Experiments** | (không có) | `notebook-planned/02_feature_experiment.ipynb` | Cần tạo để experiment trước khi commit features |
 | **Model Experiments** | (không có) | `notebook-planned/03_model_experiment.ipynb` | So sánh XGBoost vs LightGBM vs Random Forest |
-| **Bronze Artifacts** | (không có) | `data/bronze/events.parquet` | Output của `training/src/bronze.py` |
-| **Silver Artifacts** | (không có) | `data/silver/events.parquet` | Output của `training/src/silver.py` |
+| **Bronze Artifacts** | (không có) | `data/bronze/` | Parquet dataset, có thể partition theo file/tháng |
+| **Silver Artifacts** | (không có) | `data/silver/` | Cleaned parquet dataset cho session indexing |
 | **Gold Artifacts** | (không có) | `data/gold/train_snapshots.parquet` | Output của `training/src/gold.py` |
-| **Split Mapping** | (không có) | `data/gold/session_split_map.parquet` | Session boundary split assignment |
+| **Split Mapping** | (không có) | `data/gold/session_split_map.parquet` | Session-boundary split assignment để reproducibility |
 
 ---
 
@@ -224,10 +237,19 @@ from pydantic_settings import BaseSettings
 
 class TrainingSettings(BaseSettings):
     # Data Lake Paths
-    raw_data_path: str = "data/raw/<dataset-file>.csv"
-    bronze_data_path: str = "data/bronze/events.parquet"
-    silver_data_path: str = "data/silver/events.parquet"
+    raw_data_dir: str = "data/raw"
+    bronze_data_dir: str = "data/bronze"
+    silver_data_dir: str = "data/silver"
     gold_data_dir: str = "data/gold"
+
+    # Usage Windows
+    training_window_start: str = "2019-10-01T00:00:00Z"
+    training_window_end: str = "2020-02-29T23:59:59Z"
+    replay_window_start: str = "2020-03-01T00:00:00Z"
+    replay_window_end: str = "2020-04-30T23:59:59Z"
+
+    # Prediction Contract
+    prediction_horizon_minutes: int = 10
 
     # DVC + Object Storage (MinIO/S3-compatible)
     dvc_remote_name: str = "minio"

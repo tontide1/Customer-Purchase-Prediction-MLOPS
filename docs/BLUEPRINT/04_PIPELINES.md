@@ -8,76 +8,64 @@
 ## Pipeline A: Training Pipeline (Offline — Chạy 1 lần hoặc khi retrain)
 
 ```
-data/raw/<dataset-file>.csv → Bronze parse → Silver clean/sort → Session-boundary split → Gold snapshots
-    → Train → Evaluate → SHAP Analysis
-    → Validation Gate (fail-closed; first deploy auto-pass) → Register to MLflow
+data/raw/*.csv(.gz) -> Window selection -> Bronze ingestion (chunked, partitioned)
+    -> Silver clean/sort (partition-aware) -> Session index -> Session-boundary split
+    -> Gold snapshots -> Train -> Evaluate -> SHAP Analysis
+    -> Validation Gate (fail-closed; first deploy auto-pass) -> Register to MLflow
 ```
 
 > **Artifact reproducibility:** `raw/bronze/silver/gold` artifacts được version bằng DVC; file thực nằm trên MinIO/S3 remote. Mọi lần train/retrain phải trace được về DVC revision.
 
 **Chi tiết từng bước:**
 
-1. **Load Raw:** Đọc từ `data/raw/<dataset-file>.csv` qua config `raw_data_path`, validate schema bằng Pydantic.
-2. **Bronze Parse:** Parse raw CSV, rename `event_time -> source_event_time`, và ghi Parquet vào `data/bronze/`.
-3. **Data Lineage Metadata:** Ngay sau bronze parse, ghi metadata của dataset lên MLflow để đảm bảo **reproducibility** và **traceability**:
-    * `raw_file_md5`: MD5 checksum ở mức byte của file CSV gốc.
-    * `logical_dataset_hash`: fingerprint của dataset sau khi load vào DataFrame (phát hiện thay đổi nội dung bản ghi).
-    * `row_count`: Tổng số dòng trước/sau khi clean.
-    * `date_range`: Khoảng thời gian (`min(source_event_time)` → `max(source_event_time)`) của dữ liệu gốc.
-    * `data_source`: Đường dẫn raw file hoặc query PostgreSQL đã dùng.
-    * Metadata này được log bằng `mlflow.log_params()` ngay đầu experiment run.
+1. **Select Input Window:** Chọn usage window từ raw source pool trong `data/raw/` theo mục đích sử dụng.
+   * Training pipeline mặc định dùng window `2019-10` -> `2020-02`.
+   * Replay/demo pipeline dùng window `2020-03` -> `2020-04`.
+   * Retraining pipeline dùng exported operational window từ PostgreSQL sau khi materialize lại vào `data/raw/`.
 
-   ```python
-    # training/src/data_lineage.py
-     import hashlib
-     import mlflow
-     import pandas as pd
+2. **Bronze Ingestion:**
+   * Đọc từng file `.csv` hoặc `.csv.gz` trong raw window.
+   * Ưu tiên đọc theo chunk để tránh gom toàn bộ dataset vào RAM.
+   * Rename `event_time -> source_event_time`.
+   * Validate schema cơ bản và `event_type`.
+   * Ghi output vào `data/bronze/` dưới dạng parquet dataset có thể partition theo thời gian hoặc theo file nguồn.
 
-     def _file_md5(path: str) -> str:
-         with open(path, "rb") as f:
-             return hashlib.md5(f.read()).hexdigest()
-
-     def _logical_dataset_hash(df: pd.DataFrame) -> str:
-         return hashlib.md5(
-             pd.util.hash_pandas_object(df, index=True).values.tobytes()
-         ).hexdigest()
-
-     def log_data_lineage(df: pd.DataFrame, data_source: str, raw_file_path: str) -> dict:
-         """Log raw-file checksum + logical dataset fingerprint to MLflow."""
-         lineage = {
-             "data_source": data_source,
-             "raw_file_md5": _file_md5(raw_file_path),
-             "logical_dataset_hash": _logical_dataset_hash(df),
-             "row_count_raw": len(df),
-             "date_range_start": str(df["source_event_time"].min()),
-             "date_range_end": str(df["source_event_time"].max()),
-             "unique_users": df["user_id"].nunique(),
-             "unique_sessions": df["user_session"].nunique(),
-         }
-         mlflow.log_params({f"data_{k}": v for k, v in lineage.items()})
-         return lineage
-    ```
+3. **Data Lineage Metadata:**
+   * Ghi metadata của input window lên MLflow để đảm bảo reproducibility và traceability.
+   * Không assume chỉ có một raw file duy nhất.
+   * Metadata nên gồm:
+     * `raw_input_manifest_hash`
+     * `raw_input_file_count`
+     * `raw_input_files`
+     * `window_start`
+     * `window_end`
+     * `row_count_raw`
+     * `row_count_bronze`
+     * `data_source_type` (`raw_pool` hoặc `postgres_export`)
+   * Metadata này được log ngay đầu experiment run.
 
 4. **Silver Clean & Sort:**
-    * Loại bỏ dòng thiếu `user_id`, `user_session`, `event_type`.
-    * Loại bỏ dòng có `price <= 0` hoặc `price > 99th percentile`.
-    * Xử lý null `category_code`: dùng `category_id` làm fallback để đảm bảo `unique_categories` không bị undercount (accessories không có `category_code`).
-    * Ghi chú: `brand` null là expected — không loại bỏ dòng, dùng như signal cho `has_brand_info` (optional, xem mục 5.1).
-    * Log số dòng bị loại và lý do.
-    * Log `row_count_cleaned` lên MLflow sau khi clean.
-    * Sort deterministic theo `user_session` + `source_event_time`.
-    * Ghi Parquet vào `data/silver/`.
+   * Đọc bronze dataset theo partition hoặc grouped window.
+   * Loại bỏ dòng thiếu `user_id`, `user_session`, `event_type`.
+   * Loại bỏ dòng có `price <= 0` hoặc invalid price theo contract clean hiện hành.
+   * Xử lý `category_code` null bằng fallback phù hợp nếu feature contract cần exact category counts.
+   * Sort deterministic theo semantics phục vụ downstream session indexing.
+   * Ghi output vào `data/silver/` dưới dạng parquet dataset.
+
 5. **Session Index & Split Assignment:**
-    * Build session index từ silver layer với `user_session`, `session_start_time = min(source_event_time)`, `session_end_time = max(source_event_time)`.
-    * Split **theo `user_session` boundary** ở mức session index, không split trên snapshot rows.
-    * Assert một `user_session` chỉ thuộc đúng một split.
-    * Persist split assignment để dùng lại khi generate gold snapshots.
+   * Build session index toàn cục từ silver layer trên training window với:
+     * `user_session`
+     * `session_start_time = min(source_event_time)`
+     * `session_end_time = max(source_event_time)`
+   * Split train/val/test theo `session_start_time` của `user_session`.
+   * Assert một `user_session` chỉ thuộc đúng một split.
+   * Persist split assignment vào `data/gold/session_split_map.parquet` để reproducibility.
+
 6. **Gold Snapshot Generation & Feature Engineering:**
-    * Sort events theo `source_event_time` trong từng `user_session`.
-    * Tại mỗi thời điểm `t`, tạo 1 snapshot row chỉ dùng các event trước đó hoặc đúng tại `t`.
-    * Tính các feature cumulative như mục 5.1 (bao gồm xử lý `remove_from_cart` events để tính `total_removes`, `net_cart_count`, `cart_remove_rate`).
-    * Mục tiêu là để offline training nhìn thấy đúng loại state mà online inference sẽ nhận được ở Redis.
-    * Ghi output theo split vào `data/gold/`.
+   * Materialize snapshot rows từ silver dataset theo split map đã khóa.
+   * Tại mỗi thời điểm `t`, snapshot chỉ dùng các event có `source_event_time <= t`.
+   * Label = `1` nếu cùng `user_session` có ít nhất 1 `purchase` trong `(t, t + 10 phút]`, ngược lại `0`.
+   * Ghi output gold theo split vào `data/gold/`.
 7. **Labeling:** Với mỗi snapshot time `t`, label = `1` nếu cùng `user_session` có ít nhất 1 event `purchase` trong khoảng `(t, t + 10 phút]`, ngược lại `0`.
     * **Multiple purchases per session:** Dataset cho phép nhiều `purchase` events trong 1 session (= 1 đơn hàng duy nhất, nhiều items). Với target 10 phút tới, chỉ cần kiểm tra có tồn tại ít nhất 1 purchase trong horizon tương lai của snapshot.
 8. **Handle Class Imbalance:** Tỷ lệ purchase thường chỉ ~2-5% trong eCommerce. Mỗi model có cách xử lý riêng:
@@ -212,8 +200,8 @@ data/raw/<dataset-file>.csv → Bronze parse → Silver clean/sort → Session-b
     * **Rule:** Chỉ train khi required artifacts đã `dvc pull` thành công ở workspace hiện tại.
 
 **Output artifacts của pipeline A:**
-* `data/bronze/events.parquet`
-* `data/silver/events.parquet`
+* `data/bronze/`
+* `data/silver/`
 * `data/gold/train_snapshots.parquet`
 * `data/gold/val_snapshots.parquet`
 * `data/gold/test_snapshots.parquet`
@@ -230,7 +218,7 @@ Simulator/User App → Kafka → Quix Streams → Redis + PostgreSQL → FastAPI
 
 **Chi tiết từng bước:**
 
-1. **Ingest:** `simulator.py` đọc CSV → Validate event → Preserve `source_event_time` → Gắn thêm `replay_time` → Gửi vào Kafka topic `raw_events`.
+1. **Ingest:** `simulator.py` đọc replay window từ raw source pool trong `data/raw/` -> validate event -> preserve `source_event_time` -> gắn thêm `replay_time` -> gửi vào Kafka topic `raw_events`.
    * Events không hợp lệ → Log warning, skip (không gửi vào Kafka).
 2. **Process:** Quix Streams worker:
    * Consume từ Kafka → Update session state incrementally theo `user_session` → Ghi Redis (real-time) + PostgreSQL (historical).
@@ -311,23 +299,18 @@ def calculate_kl_divergence(p: np.ndarray, q: np.ndarray) -> float:
 
 > **Quy tắc quan trọng:** Retraining luôn đi qua **data lake pipeline** (raw → bronze → silver → gold). Không train trực tiếp từ PostgreSQL query. PostgreSQL chỉ cung cấp input events cho bước re-materialize.
 
-1. Export dữ liệu mới từ PostgreSQL (7-14 ngày gần nhất).
-2. **Re-materialize** dữ liệu mới qua pipeline:
-   - Ghi vào `data/raw/` (giữ nguyên format như Kaggle source)
-   - Chạy `bronze.py` → `data/bronze/`
-   - Chạy `silver.py` → `data/silver/`
-   - Chạy `session_split.py` + `gold.py` → `data/gold/` (**recompute split theo `session_start_time` trên retrain window 7-14 ngày**, không dùng split map cũ như mapping cứng)
-3. Với outputs đã có trong `dvc.yaml`: chạy `dvc repro` rồi `dvc push` để lưu artifacts retrain window lên remote MinIO/S3.
-4. Chỉ dùng `dvc add` cho artifacts ad-hoc chưa nằm trong pipeline definition.
-5. Tính PSI và KL Divergence so với training data gốc.
-6. Nếu vượt threshold → Chạy lại Pipeline A với dữ liệu gold mới (bao gồm log Data Lineage của data mới + `dvc_data_revision`).
-7. **Model Validation Gate** tự động so sánh model mới vs model production hiện tại (xem Pipeline A, bước 10).
-8. Nếu gate **pass** → Register model mới lên MLflow → Transition sang `Production` → FastAPI **tự động hot-reload** model mới trong vòng 5 phút (không cần restart).
-9. Nếu gate **fail** → Giữ model cũ, log warning kèm metrics comparison → Grafana alert thông báo → Cần review thủ công.
+1. Export dữ liệu mới từ PostgreSQL theo retraining window vận hành.
+2. Materialize dữ liệu export vào `data/raw/` theo format tương thích với raw contract.
+3. Chạy bronze ingestion -> `data/bronze/`.
+4. Chạy silver pipeline -> `data/silver/`.
+5. Build session index + split map mới trên retrain window; không reuse split map cũ như mapping cứng cho session mới.
+6. Materialize gold snapshots mới từ split map vừa tạo.
+7. Với outputs đã có trong `dvc.yaml`: chạy `dvc repro` rồi `dvc push`.
+8. Chỉ dùng `dvc add` cho artifacts ad-hoc chưa nằm trong pipeline definition.
 
 **Lý do:** Đảm bảo mọi retrained model đều có lineage hoàn chỉnh qua data lake artifacts, có thể reproduce hoàn toàn từ source.
 
-**Split policy cho retrain window:** `session_split_map.parquet` là artifact để reproducibility cho từng lần train/retrain; không phải source of truth để gán split cho các session mới trong tương lai.
+**Split policy cho retrain window:** `session_split_map.parquet` chỉ là reproducibility artifact của từng lần train/retrain; source of truth cho split assignment vẫn là session index được build lại từ silver layer của window hiện tại.
 
 ---
 

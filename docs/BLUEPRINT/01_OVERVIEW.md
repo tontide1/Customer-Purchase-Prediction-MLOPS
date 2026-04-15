@@ -29,50 +29,51 @@ trong thời gian thực với độ trễ **< 1 giây**.
 > **← Xem [1. Overview](01_OVERVIEW.md)**  
 > **→ Xem [2. Architecture](02_ARCHITECTURE.md)**
 
-## 2.1. Nguồn dữ liệu (The Golden Dataset)
+## 2.1. Nguồn dữ liệu
 
-Sử dụng bộ dữ liệu thực tế: **[eCommerce Behavior Data from Multi Category Store](https://www.kaggle.com/datasets/mkechinov/ecommerce-behavior-data-from-multi-category-store)** (Tác giả: Michael Kechinov).
-
-* **Đặc điểm:** Chứa hàng triệu dòng log hành vi (`view`, `cart`, `remove_from_cart`, `purchase`) của người dùng thực tế.
+* **Raw source pool:** Dataset hiện gồm 7 file tháng từ `2019-10` đến `2020-04`, đang lưu ở `dataset/*.csv.gz` và có thể được materialize vào `data/raw/` để chạy pipeline.
 * **Các trường quan trọng:** `event_time`, `event_type`, `product_id`, `category_id`, `category_code`, `brand`, `price`, `user_id`, `user_session`.
-* **Hiện tại:** Dataset được lưu trữ ở `dataset/*.csv.gz` (7 file từ 2019-10 đến 2020-04).
 * **Quy ước timestamp trong hệ thống:** `event_time` từ Kaggle được preserve thành `source_event_time`; simulator thêm `replay_time`; FastAPI thêm `prediction_time` trong response.
-* **Lưu ý về trường nullable:** `category_code` có thể null (thường bỏ qua cho accessories — dùng `category_id` làm fallback). `brand` có thể null với nhiều sản phẩm không có thông tin brand.
 
-## 2.2. Data Lake Layers (Raw → Bronze → Silver → Gold)
+## 2.2. Data Lake Layers (Raw -> Bronze -> Silver -> Gold)
 
 Luồng dữ liệu được chuẩn hóa theo 4 lớp bất biến:
 
-* **`data/raw/`**: CSV gốc (hoặc decompress từ `dataset/*.csv.gz`), giữ nguyên 100%, không sửa nội dung.
-* **`data/bronze/`**: Parquet sau parse schema, rename `event_time -> source_event_time`.
-* **`data/silver/`**: Parquet đã clean, sort theo `user_session` + `source_event_time`, chuẩn hóa null/outlier.
-* **`data/gold/`**: Snapshot training dataset đã có features + label cho target 10 phút tới.
+* **`data/raw/`**: Raw source pool ở dạng CSV/CSV.GZ, giữ nguyên nội dung nguồn.
+* **`data/bronze/`**: Parsed parquet artifacts sau khi rename `event_time -> source_event_time`; có thể được materialize theo chunk và partition để đảm bảo memory-safe processing.
+* **`data/silver/`**: Cleaned parquet artifacts sau khi validate required fields, làm sạch dữ liệu, và sort theo semantics phục vụ downstream session indexing; có thể được materialize theo partition/window.
+* **`data/gold/`**: Snapshot training datasets đã có features + label cho target 10 phút tới.
 
 **Data versioning layer:** Các artifacts của 4 lớp trên được version bằng **DVC** và lưu file thực trên object storage S3-compatible (MinIO).
 
-**Nguyên tắc:** split train/val/test được thực hiện ở mức `user_session` boundary trên lớp silver trước khi sinh gold snapshots để tránh leakage.
+**Nguyên tắc:** split train/val/test được xác định downstream từ silver layer theo `user_session` boundary và `session_start_time`, trước khi sinh gold snapshots để tránh leakage.
 
-## 2.3. Chiến lược Sử dụng Dữ liệu "Kép" (Dual Strategy)
+## 2.3. Một Data Lake, Nhiều Mục Đích Sử Dụng
 
-Dataset được chia làm **2 phần** phục vụ 2 mục đích riêng biệt:
+Toàn bộ 7 file tháng được xem là **một raw source pool chung** trong data lake. Từ source pool này, hệ thống có 3 cách sử dụng dữ liệu khác nhau:
 
-### Chiến lược 1: Offline Training (Huấn luyện quá khứ)
+### Offline Training
 
-* **Dữ liệu:** `data/silver/` làm input chuẩn, sau đó materialize `data/gold/` theo split.
-* **Đơn vị mẫu huấn luyện:** Không phải 1 dòng cho cả session đã kết thúc, mà là nhiều **snapshot rows** trên cùng `user_session`.
-* **Quy tắc snapshot:** Với mỗi thời điểm `t` trong session, feature chỉ được tính từ các event có `source_event_time <= t`.
+* **Training window:** Chọn dữ liệu trong khoảng `2019-10` -> `2020-02`.
+* **Input chuẩn:** Dùng `data/silver/` để build session index và split assignment, sau đó materialize `data/gold/`.
+* **Đơn vị mẫu huấn luyện:** Không phải một dòng cho cả session đã kết thúc, mà là nhiều **snapshot rows** trên cùng `user_session`.
+* **Quy tắc snapshot:** Tại mỗi thời điểm `t`, feature chỉ được tính từ các event có `source_event_time <= t`.
 * **Quy tắc label:** `1` nếu cùng `user_session` có ít nhất 1 event `purchase` trong khoảng `(t, t + 10 phút]`, ngược lại `0`.
-* **Chia tập dữ liệu (Temporal Split):**
-  * **Training set (70%):** Các `user_session` có `session_start_time` sớm nhất — để model học quy luật hành vi.
-  * **Validation set (15%):** Các `user_session` tiếp theo — để tuning hyperparameters.
-  * **Test set (15%):** Các `user_session` muộn nhất — để đánh giá model cuối cùng.
-* **Lưu ý:** Split được thực hiện theo **`user_session` boundary**, không phải snapshot boundary. Mỗi `user_session` chỉ được phép xuất hiện trong đúng một split.
+* **Split policy chính thức:** Build session index từ silver layer, sau đó split train/val/test theo `session_start_time` của `user_session`.
+* **Ràng buộc:** Mỗi `user_session` chỉ được phép xuất hiện trong đúng một split. Không split theo snapshot rows và không hard-code theo file tháng.
 
-### Chiến lược 2: Online Simulation (Tái hiện thực tại)
+### Online Replay / Demo
 
-* **Dữ liệu:** `data/raw/` làm nguồn bất biến cho replay.
-* **Kỹ thuật:** **"Data Replay"** — Script Python đọc từng dòng dữ liệu, giữ nguyên `source_event_time`, gắn thêm `replay_time`, rồi gửi vào hệ thống theo thời gian thực (giả lập độ trễ giữa các event).
-* **Lợi ích:** Dashboard hiển thị dữ liệu "có hồn", có quy luật thực tế thay vì dữ liệu random vô nghĩa.
+* **Replay window:** Chọn dữ liệu trong khoảng `2020-03` -> `2020-04`.
+* **Nguồn replay:** Đọc từ raw source pool trong `data/raw/`.
+* **Kỹ thuật:** Script replay đọc event, preserve `source_event_time`, gắn thêm `replay_time`, rồi gửi vào hệ thống theo thời gian thực.
+* **Mục đích:** Mô phỏng behavior online thực tế mà không phá vỡ source timeline semantics của dữ liệu gốc.
+
+### Retraining
+
+* **Nguồn input:** Export events mới từ PostgreSQL theo một retraining window vận hành.
+* **Yêu cầu bắt buộc:** Dữ liệu export phải được re-materialize lại qua `raw -> bronze -> silver -> gold` trước khi train.
+* **Lý do:** Giữ reproducibility, lineage, và cùng semantics với offline training pipeline.
 
 ## 2.4. Data Validation (Kiểm tra chất lượng)
 

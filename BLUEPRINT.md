@@ -60,17 +60,19 @@ trong thời gian thực với độ trễ **< 1 giây**.
 
 ### Điểm nổi bật
 
-- **Train/Serve Alignment:** Offline training dùng snapshot theo thời điểm, cùng semantics với online inference
-- **Data Lake Layers:** `raw/bronze/silver/gold` tách bạch ingest, chuẩn hóa schema, clean, và snapshot training
-- **Reproducible Data Pipeline:** Mỗi artifact trong `raw/bronze/silver/gold` được version bằng DVC và push lên MinIO/S3 remote
-- **Training/Retraining Source of Truth:** Luôn đi qua data lake artifacts. PostgreSQL chỉ là operational store, retraining phải re-materialize qua pipeline.
-- **Exact Count Semantics:** Redis dùng Set thay vì HyperLogLog để đảm bảo train/serve parity chính xác cho unique_products, unique_categories
-- **Event Ordering Policy:** Deterministic `event_id`, deduplication, late-event handling, manual event metadata
-- **Multi-Model Experimentation:** Train & compare 3 models (XGBoost, LightGBM, Random Forest), auto-select best
-- **Closed-Loop MLOps:** Drift detection → Retrain (re-materialize) → Validation Gate → Hot-Reload
-- **Real-time Explainability:** SHAP values cho từng prediction
-- **Zero-Downtime:** Model hot-reload mỗi 5 phút
-- **One-Command Deploy:** Docker Compose
+- **Train/Serve Alignment:** Offline training dùng snapshot theo thời điểm, cùng semantics với online inference: tại snapshot time `t`, feature chỉ dùng các event đã xảy ra đến `t`.
+- **One Data Lake, Multiple Usage Windows:** Raw source pool gồm 7 file tháng; training, replay/demo, và retraining chỉ là các cách sử dụng khác nhau trên cùng data lake, không phải 3 pipeline dữ liệu độc lập.
+- **Data Lake Layers:** `raw/bronze/silver/gold` tách bạch ingest, chuẩn hóa schema, clean, session-aware split, và snapshot training.
+- **Official Split Policy:** Train/val/test split được xác định downstream từ silver layer theo `session_start_time` và `user_session` boundary, không split theo snapshot rows hoặc hard-code theo file tháng.
+- **Training/Retraining Source of Truth:** Luôn đi qua data lake artifacts. PostgreSQL chỉ là operational store và nguồn export cho retraining trước khi re-materialize lại qua pipeline.
+- **Memory-Safe Materialization:** Bronze và silver artifacts có thể được materialize dưới dạng chunked/partitioned parquet datasets để xử lý dataset lớn mà không cần gom toàn bộ vào RAM.
+- **Exact Count Semantics:** Redis dùng Set thay vì HyperLogLog để đảm bảo train/serve parity chính xác cho `unique_products`, `unique_categories`.
+- **Event Ordering Policy:** Deterministic `event_id`, deduplication, late-event handling, manual event metadata.
+- **Multi-Model Experimentation:** Train và compare 3 models (XGBoost, LightGBM, Random Forest), auto-select best.
+- **Closed-Loop MLOps:** Drift detection -> Retrain (re-materialize) -> Validation Gate -> Hot-Reload.
+- **Real-time Explainability:** SHAP values cho từng prediction.
+- **Zero-Downtime:** Model hot-reload mỗi 5 phút.
+- **One-Command Deploy:** Docker Compose.
 
 ---
 
