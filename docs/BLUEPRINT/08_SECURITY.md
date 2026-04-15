@@ -1,4 +1,4 @@
-# 11. Security Considerations
+# 8. Security Considerations
 
 > **← Xem [7. Testing](07_TESTING.md)**  
 > **→ Xem [9. Explainability](09_EXPLAINABILITY.md)**
@@ -8,7 +8,7 @@
 
 ---
 
-## 11.1. API Key Authentication
+## 8.1. API Key Authentication
 
 Mọi request đến FastAPI phải kèm header `X-API-Key`. Đơn giản, hiệu quả, phù hợp cho internal services:
 
@@ -34,7 +34,7 @@ async def verify_api_key(api_key: str = Security(api_key_header)) -> str:
 
 ---
 
-## 11.2. Rate Limiting
+## 8.2. Rate Limiting
 
 Sử dụng **slowapi** để giới hạn số request, tránh abuse hoặc vòng lặp vô hạn từ client:
 
@@ -56,7 +56,7 @@ async def predict(user_session: str, request: Request):
 
 ---
 
-## 11.3. Input Validation
+## 8.3. Input Validation
 
 Đã tích hợp xuyên suốt hệ thống (không phải section riêng — đây là best practice):
 
@@ -67,7 +67,7 @@ async def predict(user_session: str, request: Request):
 
 ---
 
-## 11.4. Secrets Management
+## 8.4. Secrets Management
 
 | Secret | Lưu trữ | Truy cập |
 | --- | --- | --- |

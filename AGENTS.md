@@ -42,3 +42,9 @@
   - `docs/BLUEPRINT/04_PIPELINES.md`
   - `docs/BLUEPRINT/05_PROJECT_STRUCTURE.md`
   - `docs/BLUEPRINT/07_TESTING.md`
+
+## Working Style
+- Ask before guessing when requirements, contracts, or scope are ambiguous.
+- Prefer the smallest correct change; do not add speculative abstractions or knobs.
+- Keep edits surgical; do not refactor or "improve" unrelated code, docs, or formatting.
+- Define success criteria up front and verify them with tests, reads, or direct checks before finishing.

@@ -1,17 +1,17 @@
-# 15. Roadmap triển khai
+# 12. Roadmap triển khai
 
 > **← Xem [11. Demo](11_DEMO.md)**  
-> **→ Xem [BLUEPRINT.md gốc](../BLUEPRINT.md)**
+> **→ Xem [BLUEPRINT.md gốc](../../BLUEPRINT.md)**
 
 | Tuần | Milestone | Deliverables |
 | --- | --- | --- |
-| **1** | Data Foundation | `data/raw/`, chunked + partitioned `data/bronze/`, partition-aware `data/silver/`, config paths theo directory semantics, timestamp contract (`source_event_time`, `replay_time`, `prediction_time`), DVC init + MinIO remote setup |
+| **1** | Data Foundation | `data/raw/`, chunked + partitioned `data/bronze/`, partition-aware `data/silver/`, config paths theo directory semantics, timestamp contract (`source_event_time`, `replay_time`, `prediction_time`), DVC init + MinIO remote setup + bronze memory benchmark report |
 | **2** | Training Pipeline | Global session index, session-boundary split, snapshot dataset builder, 10-minute horizon labeling, `data/gold/` artifacts, feature engineering, **multi-model training (XGBoost, LightGBM, Random Forest)**, model comparison & auto-selection, SHAP analysis, MLflow integration, **Data Lineage**, **Model Validation Gate** |
 | **3** | Stream Processing | Quix Streams processor, session-scoped Redis feature store, Kafka topics, timestamp preservation, **cache invalidation logic** |
 | **4** | Serving & API | FastAPI (predict + explain + health) theo `user_session`, security (API Key + rate limit), **Model Hot-Reload**, **Prediction Caching**, unit tests |
 | **5** | Frontend & Dashboard | Streamlit User App + Admin Dashboard (tích hợp SHAP visualization) |
 | **6** | Monitoring & CI | Prometheus + Grafana (latency panels + **6 alert rules + Webhook**), GitHub Actions (**pytest-cov ≥ 70%**), integration tests cho snapshot target và session-scoped serving |
-| **7** | Polish & Demo | Demo script rehearsal (11 bước), documentation, edge case testing, bronze memory benchmark review |
+| **7** | Polish & Demo | Demo script rehearsal (11 bước), documentation, edge case testing, bronze memory benchmark review + saved benchmark artifact |
 
 ---
 
@@ -44,6 +44,9 @@
 * Thêm test cho chunked bronze ingestion contract.
 * Thêm test cross-month session boundary.
 * Thêm test disjoint split map và window isolation.
+
+**Repo-wide contract scan**
+* Chạy stale-contract scan để fail nếu còn reference path/setting cũ như `data/bronze/events.parquet`, `data/silver/events.parquet`, `raw_data_path`, `bronze_data_path`, `silver_data_path`.
 
 ### Code Module Plan
 
@@ -160,3 +163,5 @@
 9. Redis exact count (Set/SCARD) phải khớp với offline exact counts.
 10. Bronze row-count parity phải giữ nguyên khi chuyển sang chunked/partitioned materialization.
 11. `dvc repro` + `dvc push` thành công, artifacts có thể `dvc pull` lại trên máy mới.
+12. Repo-wide stale-contract scan phải sạch, không còn reference contract cũ.
+13. Bronze memory benchmark phải được lưu thành report/artifact cho raw source pool 7 file.

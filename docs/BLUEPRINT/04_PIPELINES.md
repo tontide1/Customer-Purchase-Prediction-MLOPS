@@ -1,4 +1,4 @@
-# 6. Chi tiết các Pipelines (Data Flow Spec)
+# 4. Chi tiết các Pipelines (Data Flow Spec)
 
 > **← Xem [3. Features](03_FEATURES.md)**  
 > **→ Xem [5. Project Structure](05_PROJECT_STRUCTURE.md)**
@@ -16,41 +16,48 @@ data/raw/*.csv(.gz) -> Window selection -> Bronze ingestion (chunked, partitione
 
 > **Artifact reproducibility:** `raw/bronze/silver/gold` artifacts được version bằng DVC; file thực nằm trên MinIO/S3 remote. Mọi lần train/retrain phải trace được về DVC revision.
 
+> **Partition boundary note:** Partition theo `year/month` chỉ là physical storage layout để materialization memory-safe; không được dùng làm boundary logic cho split train/val/test.
+
+## Usage Windows Overview
+
+* **Training window:** `2019-10` -> `2020-02`.
+* **Replay/demo window:** `2020-03` -> `2020-04`.
+* **Retraining window:** export từ PostgreSQL rồi re-materialize vào `data/raw/` trước khi chạy pipeline.
+
 **Chi tiết từng bước:**
 
-1. **Select Input Window:** Chọn usage window từ raw source pool trong `data/raw/` theo mục đích sử dụng.
+1. **Select Training Window:** Chọn usage window cho offline training trong raw source pool `data/raw/`.
    * Training pipeline mặc định dùng window `2019-10` -> `2020-02`.
-   * Replay/demo pipeline dùng window `2020-03` -> `2020-04`.
-   * Retraining pipeline dùng exported operational window từ PostgreSQL sau khi materialize lại vào `data/raw/`.
 
 2. **Bronze Ingestion:**
-   * Đọc từng file `.csv` hoặc `.csv.gz` trong raw window.
-   * Ưu tiên đọc theo chunk để tránh gom toàn bộ dataset vào RAM.
-   * Rename `event_time -> source_event_time`.
-   * Validate schema cơ bản và `event_type`.
-   * Ghi output vào `data/bronze/` dưới dạng parquet dataset có thể partition theo thời gian hoặc theo file nguồn.
+    * Đọc từng file `.csv` hoặc `.csv.gz` trong raw window.
+    * Ưu tiên đọc theo chunk để tránh gom toàn bộ dataset vào RAM.
+    * Rename `event_time -> source_event_time`.
+    * Validate schema cơ bản và `event_type`.
+    * Ghi output vào `data/bronze/` dưới dạng parquet dataset có thể partition theo thời gian hoặc theo file nguồn.
 
 3. **Data Lineage Metadata:**
-   * Ghi metadata của input window lên MLflow để đảm bảo reproducibility và traceability.
-   * Không assume chỉ có một raw file duy nhất.
-   * Metadata nên gồm:
-     * `raw_input_manifest_hash`
-     * `raw_input_file_count`
-     * `raw_input_files`
-     * `window_start`
-     * `window_end`
-     * `row_count_raw`
-     * `row_count_bronze`
-     * `data_source_type` (`raw_pool` hoặc `postgres_export`)
-   * Metadata này được log ngay đầu experiment run.
+    * Ghi metadata của input window lên MLflow để đảm bảo reproducibility và traceability.
+    * Không assume chỉ có một raw file duy nhất.
+    * MLflow params nên gồm:
+      * `raw_input_manifest_hash`
+      * `raw_input_file_count`
+      * `window_start_utc`
+      * `window_end_utc`
+      * `row_count_raw`
+      * `row_count_bronze`
+      * `data_source_type` (`raw_pool` hoặc `postgres_export`)
+    * Danh sách đầy đủ `raw_input_files` nên lưu trong artifact `raw_input_manifest.json` với path/size/modified_time/checksum, không log vào params.
+    * Metadata này được log ngay đầu experiment run.
 
 4. **Silver Clean & Sort:**
-   * Đọc bronze dataset theo partition hoặc grouped window.
-   * Loại bỏ dòng thiếu `user_id`, `user_session`, `event_type`.
-   * Loại bỏ dòng có `price <= 0` hoặc invalid price theo contract clean hiện hành.
-   * Xử lý `category_code` null bằng fallback phù hợp nếu feature contract cần exact category counts.
-   * Sort deterministic theo semantics phục vụ downstream session indexing.
-   * Ghi output vào `data/silver/` dưới dạng parquet dataset.
+    * Đọc bronze dataset theo partition hoặc grouped window.
+    * Loại bỏ dòng thiếu `user_id`, `user_session`, `event_type`.
+    * Loại bỏ dòng có `price <= 0` hoặc invalid price theo contract clean hiện hành.
+    * Xử lý `category_code` null bằng fallback phù hợp nếu feature contract cần exact category counts.
+    * Sort deterministic theo semantics phục vụ downstream session indexing.
+    * Có thể materialize theo partition để tiết kiệm memory, nhưng session index vẫn phải được build trên toàn bộ training window; không được build độc lập từng partition rồi ghép lại.
+    * Ghi output vào `data/silver/` dưới dạng parquet dataset.
 
 5. **Session Index & Split Assignment:**
    * Build session index toàn cục từ silver layer trên training window với:
@@ -62,39 +69,38 @@ data/raw/*.csv(.gz) -> Window selection -> Bronze ingestion (chunked, partitione
    * Persist split assignment vào `data/gold/session_split_map.parquet` để reproducibility.
 
 6. **Gold Snapshot Generation & Feature Engineering:**
-   * Materialize snapshot rows từ silver dataset theo split map đã khóa.
-   * Tại mỗi thời điểm `t`, snapshot chỉ dùng các event có `source_event_time <= t`.
-   * Label = `1` nếu cùng `user_session` có ít nhất 1 `purchase` trong `(t, t + 10 phút]`, ngược lại `0`.
-   * Ghi output gold theo split vào `data/gold/`.
-7. **Labeling:** Với mỗi snapshot time `t`, label = `1` nếu cùng `user_session` có ít nhất 1 event `purchase` trong khoảng `(t, t + 10 phút]`, ngược lại `0`.
-    * **Multiple purchases per session:** Dataset cho phép nhiều `purchase` events trong 1 session (= 1 đơn hàng duy nhất, nhiều items). Với target 10 phút tới, chỉ cần kiểm tra có tồn tại ít nhất 1 purchase trong horizon tương lai của snapshot.
-8. **Handle Class Imbalance:** Tỷ lệ purchase thường chỉ ~2-5% trong eCommerce. Mỗi model có cách xử lý riêng:
+    * Materialize snapshot rows từ silver dataset theo split map đã khóa.
+    * Tại mỗi thời điểm `t`, snapshot chỉ dùng các event có `source_event_time <= t`.
+    * Label = `1` nếu cùng `user_session` có ít nhất 1 `purchase` trong `(t, t + 10 phút]`, ngược lại `0`.
+    * Nếu một session có nhiều `purchase` trong horizon, vẫn chỉ cần tồn tại ít nhất một `purchase` để gán label `1`.
+    * Ghi output gold theo split vào `data/gold/`.
+7. **Handle Class Imbalance:** Tỷ lệ purchase thường chỉ ~2-5% trong eCommerce. Mỗi model có cách xử lý riêng:
    * **XGBoost:** Sử dụng `scale_pos_weight` (tỷ lệ negative/positive).
    * **LightGBM:** Sử dụng `is_unbalance=True` hoặc `scale_pos_weight`.
    * **Random Forest:** Sử dụng `class_weight='balanced'`.
    * So sánh với SMOTE trong experiment log.
-9. **Train Multi-Model:** Train **3 models** song song, mỗi model có **experiment run riêng** trên MLflow:
+8. **Train Multi-Model:** Train **3 models** song song, mỗi model có **experiment run riêng** trên MLflow:
    * **Model 1 — XGBoost:** Binary Classifier với hyperparameter tuning (Optuna, 50 trials).
    * **Model 2 — LightGBM:** Binary Classifier với hyperparameter tuning (Optuna, 50 trials). Thường nhanh hơn XGBoost trên large datasets.
    * **Model 3 — Random Forest:** Binary Classifier với hyperparameter tuning (Optuna, 50 trials). Ensemble learning kinh điển, ít bị overfit.
    * Mỗi model được log đầy đủ metrics (PR-AUC, F1, Precision, Recall) + hyperparameters lên MLflow.
    * **MLflow Experiment Tracking:** Sử dụng cùng 1 experiment name, mỗi model là 1 run → dễ dàng compare trên MLflow UI.
-10. **Model Comparison & Auto-Selection:**
+9. **Model Comparison & Auto-Selection:**
    * So sánh **PR-AUC** của 3 models trên **Validation Set**.
    * **Tự động chọn best model** (model có PR-AUC cao nhất) → Tiếp tục vào Validation Gate.
    * Log kết quả comparison (tên model, PR-AUC của từng model, model được chọn) lên MLflow.
    * **MLflow UI:** Giảng viên có thể nhìn thấy bảng so sánh 3 models ngay trên giao diện.
-11. **Evaluate trên Test Set** (chỉ cho **best model**):
+10. **Evaluate trên Test Set** (chỉ cho **best model**):
    * Metrics chính: **PR-AUC** cho target **purchase trong 10 phút tới** (phù hợp hơn ROC-AUC cho imbalanced data).
    * Metrics phụ: F1-Score, Precision, Recall, Confusion Matrix.
    * **Threshold tuning:** Chọn threshold tối ưu dựa trên Precision-Recall curve.
-12. **SHAP Analysis (Model Explainability):**
+11. **SHAP Analysis (Model Explainability):**
 
 * Tính **Global Feature Importance** bằng `shap.TreeExplainer` trên tập validation (tương thích với cả 3 tree-based models).
 * Lưu SHAP summary plot (bar chart top features) lên MLflow artifacts.
 * Lưu SHAP explainer object (pickle) để phục vụ real-time explanation qua API.
 
-13. **Model Validation Gate (Quality Gate):**
+12. **Model Validation Gate (Quality Gate):**
     * Trước khi register, so sánh **PR-AUC của best model mới** với **model đang production** (lấy từ MLflow Model Registry, stage `Production`).
     * **Quy tắc:**
       * Nếu **chưa có model production** (lần train đầu tiên) → Tự động pass gate.
@@ -191,9 +197,9 @@ data/raw/*.csv(.gz) -> Window selection -> Bronze ingestion (chunked, partitione
             return False
     ```
 
-14. **Register (Conditional):** Chỉ khi Validation Gate pass → Lưu best model, SHAP explainer, metrics, hyperparameters, model type (đánh dấu loại model: XGBoost/LightGBM/Random Forest), và data lineage lên **MLflow** → Transition model sang stage `Production`.
+13. **Register (Conditional):** Chỉ khi Validation Gate pass → Lưu best model, SHAP explainer, metrics, hyperparameters, model type (đánh dấu loại model: XGBoost/LightGBM/Random Forest), và data lineage lên **MLflow** → Transition model sang stage `Production`.
 
-15. **DVC Artifact Commit & Push:**
+14. **DVC Artifact Commit & Push:**
     * Cập nhật `dvc.lock` sau khi materialize artifacts mới.
     * Push artifacts lên remote MinIO/S3 bằng `dvc push`.
     * Log `dvc_data_revision` (Git SHA hoặc DVC lock hash) vào MLflow run để liên kết model ↔ data revision.
@@ -351,7 +357,7 @@ Nếu PR-AUC < 0.7 → Trigger retrain alert
       "evaluation_mode": "demo_replay",
       "fallback_reason": null,
       "horizon_minutes": 10,
-      "source_event_time": "2026-04-12T10:25:00Z"
+      "source_event_time": "2020-04-12T10:25:00Z"
     }
    ```
    → Lưu vào PostgreSQL table `predictions`.

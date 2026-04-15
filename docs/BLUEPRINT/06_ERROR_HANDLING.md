@@ -1,11 +1,11 @@
-# 9. Error Handling & Logging
+# 6. Error Handling & Logging
 
 > **← Xem [5. Project Structure](05_PROJECT_STRUCTURE.md)**  
 > **→ Xem [7. Testing](07_TESTING.md)**
 
 ---
 
-## 9.1. Error Handling Strategy
+## 6.1. Error Handling Strategy
 
 > **Contract note:** Blueprint snippets ở file này là target-state contract, không phải code đã runnable ngay trong repo hiện tại.
 
@@ -27,7 +27,7 @@
 
 ---
 
-## 9.2. Structured Logging
+## 6.2. Structured Logging
 
 Sử dụng **Loguru** với format JSON, thống nhất across all services:
 
@@ -38,7 +38,7 @@ Sử dụng **Loguru** với format JSON, thống nhất across all services:
 
 ---
 
-## 9.3. Log Sanitization
+## 6.3. Log Sanitization
 
 > **Quy tắc quan trọng:** KHÔNG BAO GIỜ log thông tin nhạy cảm, dù đã dùng `.env`.
 

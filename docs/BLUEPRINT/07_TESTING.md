@@ -1,11 +1,11 @@
-# 10. Testing Strategy
+# 7. Testing Strategy
 
 > **← Xem [6. Error Handling](06_ERROR_HANDLING.md)**  
 > **→ Xem [8. Security](08_SECURITY.md)**
 
 ---
 
-## 10.1. Unit Tests (Pytest)
+## 7.1. Unit Tests (Pytest)
 
 * **Feature Engineering:** Test snapshot builder và từng function tạo feature (input → expected output), đảm bảo chỉ dùng past events tại thời điểm `t`.
 * **Labeling Logic:** Test `purchase within next 10 minutes` được gán đúng cho cùng `user_session`.
@@ -25,10 +25,11 @@
 * **Split Map Disjointness:** Test `session_split_map.parquet` luôn đảm bảo train/val/test disjoint theo `user_session`.
 * **Window Isolation:** Test training window và replay/demo window không bị trộn dữ liệu.
 * **Materialization Strategy Invariance:** Test thay đổi cách materialize bronze/silver không làm đổi exact counts và downstream labeling semantics.
+* **Stale Contract Detection:** Test/lint scan fail nếu docs/config còn reference contract cũ như `data/bronze/events.parquet`, `data/silver/events.parquet`, `raw_data_path`, `bronze_data_path`, `silver_data_path`.
 
 ---
 
-## 10.2. Model Validation Tests
+## 7.2. Model Validation Tests
 
 Test **Model Validation Gate** đảm bảo model kém không được deploy:
 
@@ -116,7 +117,7 @@ class TestModelValidationGate:
 
 ---
 
-## 10.3. Model Hot-Reload Tests
+## 7.3. Model Hot-Reload Tests
 
 Test **ModelLoader** đảm bảo hot-reload hoạt động đúng và thread-safe:
 
@@ -191,7 +192,7 @@ class TestModelLoader:
 
 ---
 
-## 10.4. Prediction Cache Tests
+## 7.4. Prediction Cache Tests
 
 Test **PredictionCache** đảm bảo cache hit/miss/invalidation hoạt động đúng:
 
@@ -255,7 +256,7 @@ class TestPredictionCache:
 
 ---
 
-## 10.5. Integration Tests
+## 7.5. Integration Tests
 
 * **Raw Pool -> Bronze Dataset:** Gửi nhiều raw files tháng vào pipeline, verify `event_time` được parse thành `source_event_time` và output được materialize vào `data/bronze/` dưới dạng dataset directory.
 * **Bronze Dataset -> Silver Dataset:** Verify clean/null/invalid/sort logic tạo `data/silver/` đúng và deterministic khi input là bronze dataset nhiều partitions/files.
@@ -278,7 +279,7 @@ class TestPredictionCache:
 
 ---
 
-## 10.6. CI Pipeline (GitHub Actions)
+## 7.6. CI Pipeline (GitHub Actions)
 
 > Example target-state CI workflow; illustrative, không đảm bảo chạy ngay trong current repository state.
 

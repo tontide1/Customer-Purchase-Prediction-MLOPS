@@ -6,7 +6,7 @@ Hệ thống Phân tích & Dự đoán Ý định Mua hàng Thời gian thực
 
 ## ⚠️ Document Status
 
-**Trạng thái:** `FREEZE-READY` ✅ (Kiến trúc mục tiêu locked & verified)
+**Trạng thái:** `FREEZE-READY` ✅ (Blueprint/kiến trúc mục tiêu locked & verified)
 
 > **Lưu ý quan trọng:** Blueprint này mô tả **kiến trúc và thiết kế mục tiêu** cho hệ thống. Hiện tại, repository chứa:
 > - ✅ Dataset gốc (`dataset/*.csv.gz`)
@@ -66,7 +66,7 @@ trong thời gian thực với độ trễ **< 1 giây**.
 - **Data Lake Layers:** `raw/bronze/silver/gold` tách bạch ingest, chuẩn hóa schema, clean, session-aware split, và snapshot training.
 - **Official Split Policy:** Train/val/test split được xác định downstream từ silver layer theo `session_start_time` (UTC-normalized) và `user_session` boundary, không split theo snapshot rows hoặc hard-code theo file tháng.
 - **Training/Retraining Source of Truth:** Luôn đi qua data lake artifacts. PostgreSQL chỉ là operational store và nguồn export cho retraining trước khi re-materialize lại qua pipeline.
-- **Memory-Safe Materialization:** Bronze và silver artifacts có thể được materialize dưới dạng chunked/partitioned parquet datasets để xử lý dataset lớn mà không cần gom toàn bộ vào RAM.
+- **Memory-Safe Materialization:** Bronze và silver artifacts có thể được materialize dưới dạng chunked/partitioned parquet datasets để xử lý dataset lớn mà không cần gom toàn bộ vào RAM; đây là implementation strategy, không đổi canonical split semantics theo session.
 - **Exact Count Semantics:** Redis dùng Set thay vì HyperLogLog để đảm bảo train/serve parity chính xác cho `unique_products`, `unique_categories`.
 - **Event Ordering Policy:** Deterministic `event_id`, deduplication, late-event handling, manual event metadata.
 - **Multi-Model Experimentation:** Train và compare 3 models (XGBoost, LightGBM, Random Forest), auto-select best.

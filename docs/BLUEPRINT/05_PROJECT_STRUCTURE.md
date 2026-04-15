@@ -1,9 +1,9 @@
-# 7. Cấu trúc Dự án (Project Structure)
+# 5. Cấu trúc Dự án (Project Structure)
 
 > **← Xem [4. Pipelines](04_PIPELINES.md)**  
 > **→ Xem [6. Error Handling](06_ERROR_HANDLING.md)**
 
-## 7.1. Repository Layout - TARGET STATE
+## 5.1. Repository Layout - TARGET STATE
 
 Cấu trúc này mô tả **trạng thái hoàn chỉnh** của repository khi tất cả services, training, monitoring, CI/CD được triển khai đầy đủ:
 
@@ -67,8 +67,8 @@ REAL-TIME-ECOMMERCE-INTENT-SYSTEM/
 ├── training/                       # (TO-DO: hoàn thiện training pipeline)
 │   ├── src/
 │   │   ├── train.py                # Main training script
-│   │   ├── bronze.py               # Raw CSV -> bronze parquet
-│   │   ├── silver.py               # Bronze -> silver clean/sort parquet
+│   │   ├── bronze.py               # Raw pool -> bronze parquet dataset
+│   │   ├── silver.py               # Bronze dataset -> silver cleaned dataset
 │   │   ├── session_split.py        # Silver -> session-boundary split map
 │   │   ├── gold.py                 # Silver + split map -> gold snapshots
 │   │   ├── features.py             # Feature engineering logic
@@ -160,6 +160,8 @@ REAL-TIME-ECOMMERCE-INTENT-SYSTEM/
         └── session_split_map.parquet
 ```
 
+> **Lưu ý:** Partition tree bên trên chỉ là illustrative target-state. Có thể partition theo month, source file, hoặc grouped window; miễn là không đổi contract downstream theo `session_start_time` và `user_session`.
+
 ### Legend
 - ✅ **CURRENT STATE**: Thành phần hiện đã có trong repo
 - 🔄 **TO-DO**: Cần triển khai theo blueprint
@@ -167,7 +169,7 @@ REAL-TIME-ECOMMERCE-INTENT-SYSTEM/
 
 ---
 
-## 7.2. Data Lake Paths - Tương ứng giữa Current và Target
+## 5.2. Data Lake Paths - Tương ứng giữa Current và Target
 
 | Purpose | Current Path | Target Path | Ghi chú |
 |---------|--------------|------------|---------|
@@ -175,16 +177,16 @@ REAL-TIME-ECOMMERCE-INTENT-SYSTEM/
 | **Analysis & EDA** | `notebook/eda.ipynb` | `notebook/` hoặc `notebook-planned/` | Tái sử dụng insights từ EDA hiện có |
 | **Feature Experiments** | (không có) | `notebook-planned/02_feature_experiment.ipynb` | Cần tạo để experiment trước khi commit features |
 | **Model Experiments** | (không có) | `notebook-planned/03_model_experiment.ipynb` | So sánh XGBoost vs LightGBM vs Random Forest |
-| **Bronze Artifacts** | (không có) | `data/bronze/` | Parquet dataset, có thể partition theo file/tháng |
-| **Silver Artifacts** | (không có) | `data/silver/` | Cleaned parquet dataset cho session indexing |
+| **Bronze Artifacts** | (không có) | `data/bronze/` | Dataset directory cho parquet bronze, có thể partition theo file/tháng |
+| **Silver Artifacts** | (không có) | `data/silver/` | Dataset directory cho parquet silver, phục vụ session indexing |
 | **Gold Artifacts** | (không có) | `data/gold/train_snapshots.parquet` | Output của `training/src/gold.py` |
-| **Split Mapping** | (không có) | `data/gold/session_split_map.parquet` | Session-boundary split assignment để reproducibility |
+| **Split Mapping** | (không có) | `data/gold/session_split_map.parquet` | Reproducibility artifact downstream; không phải source of truth cho session mới |
 
 ---
 
 ---
 
-# 8. Configuration Management
+# 6. Configuration Management
 
 > **← Xem [5. Project Structure](05_PROJECT_STRUCTURE.md)**  
 > **→ Xem [6. Error Handling](06_ERROR_HANDLING.md)**

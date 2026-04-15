@@ -32,11 +32,14 @@ Chuẩn hóa lại BLUEPRINT để phản ánh đúng contract kiến trúc cầ
 4. Recommended partition layout:
    `data/bronze/year=2019/month=10/part-*.parquet`
    `data/silver/year=2019/month=10/part-*.parquet`
-5. Training window là Oct 2019 -> Feb 2020.
-6. Replay/demo window là Mar 2020 -> Apr 2020.
-7. Split train/val/test chỉ được xác định downstream từ silver layer theo `session_start_time` và `user_session` boundary.
+   - **⚠️ Partition layout chỉ là physical storage layout để materialize parquet dataset memory-safe; đây không phải processing boundary logic, split boundary, hay session-assignment boundary.**
+   - **⚠️ Session index phải được build trên toàn bộ training window đã chọn, không được build/split độc lập theo từng year/month partition.**
+5. Training window là Oct 2019 -> Feb 2020 (UTC-normalized).
+6. Replay/demo window là Mar 2020 -> Apr 2020 (UTC-normalized).
+7. Split train/val/test chỉ được xác định downstream từ silver layer theo `session_start_time` (UTC) và `user_session` boundary.
 8. `session_split_map.parquet` là reproducibility artifact downstream từ silver, không phải source of truth cho session mới.
 9. Retraining từ PostgreSQL phải export rồi re-materialize lại qua data lake.
+10. Data lineage metadata phải lưu manifest dưới dạng artifact, không log toàn bộ danh sách files vào MLflow params.
 
 ---
 

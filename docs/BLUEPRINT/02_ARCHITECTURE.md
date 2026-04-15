@@ -1,4 +1,4 @@
-# 3. Kiến trúc Hệ thống (System Architecture)
+# 2. Kiến trúc Hệ thống (System Architecture)
 
 > **← Xem [1. Overview](01_OVERVIEW.md)**  
 > **→ Xem [3. Features](03_FEATURES.md)**
@@ -10,7 +10,7 @@ Hệ thống hoạt động theo mô hình **Event-Driven Microservices**, chia 
 │                     TẦNG 1: INGESTION (Đầu vào)                        │
 │  ┌──────────────┐    ┌──────────────┐                                  │
 │  │  Simulator    │    │  User App    │                                  │
-│  │  (Replay CSV) │    │  (Streamlit) │                                  │
+│  │ (Replay Window)│    │  (Streamlit) │                                  │
 │  └──────┬───────┘    └──────┬───────┘                                  │
 │         └────────┬──────────┘                                          │
 │                  ▼                                                      │
@@ -51,9 +51,10 @@ Hệ thống hoạt động theo mô hình **Event-Driven Microservices**, chia 
 
 ### Tầng 1: Ingestion & Simulation (Đầu vào)
 
-* **Data Replayer (Simulator):** Đọc file CSV Kaggle → Validate schema → Sinh deterministic `event_id` → Gắn `source=kaggle` → Gửi event vào Kafka topic `raw_events`.
+* **Data Replayer (Simulator):** Đọc replay window từ raw source pool trong `data/raw/` → Validate schema → Sinh deterministic `event_id` → Gắn `source=kaggle` → Gửi event vào Kafka topic `raw_events`.
   * **Event ID Generation (canonical):** `event_id = hash(f"{user_session}|{source_event_time}|{event_type}|{product_id}|{user_id}")` — deterministic để đảm bảo deduplication hoạt động đúng.
   * **Timestamp Contract:** Dữ liệu CSV giữ nguyên `source_event_time` để đảm bảo reproducibility. Simulator chỉ gắn thêm `replay_time` khi bắn event vào Kafka. Nếu stream processor cần xử lý theo processing time thì vẫn dùng clock hiện tại của worker, nhưng không được làm mất timestamp gốc.
+  * **Usage Window Note:** Replay/demo là một usage window trên cùng data lake, không phải source dữ liệu độc lập ngoài `data/raw/`.
 * **User App (Streamlit):** Giao diện demo cho phép người demo chèn hành động thủ công vào luồng dữ liệu.
   * **Manual Event Contract:** Gắn `source = "manual"`, `source_event_time = replay_time_now` (không giả làm historical replay).
   * **Configurable:** Late event threshold (default 60 giây) có thể config qua `.env`.
@@ -82,6 +83,7 @@ Hệ thống hoạt động theo mô hình **Event-Driven Microservices**, chia 
 
 * **Artifact Storage (Data Lake Remote):** **MinIO** (S3-compatible object storage).
   * Lưu file artifacts lớn của `data/raw`, `data/bronze`, `data/silver`, `data/gold`.
+  * Bronze/silver có thể materialize dưới dạng dataset directories partitioned/chunked để phục vụ memory-safe processing.
   * Là remote backend cho DVC (`dvc push`/`dvc pull`).
 
 * **Data Versioning:** **DVC**.
@@ -213,7 +215,7 @@ services:
 
 ---
 
-# 4. Technology Stack
+# 3. Technology Stack
 
 > **← Xem [2. Architecture](02_ARCHITECTURE.md)**  
 > **→ Xem [3. Features](03_FEATURES.md)**
@@ -241,12 +243,12 @@ services:
 
 ---
 
-# 5. Closed-Loop MLOps Orchestration
+# 4. Closed-Loop MLOps Orchestration
 
 > **← Xem [4. Technology Stack](02_ARCHITECTURE.md)**  
 > **→ Xem [3. Features](03_FEATURES.md)**
 
-## 5.1. Retraining Trigger & Orchestration
+## 4.1. Retraining Trigger & Orchestration
 
 **Trạng thái hiện tại:** Drift detection và retraining được chuẩn bị sẵn sàng để chạy thủ công hoặc qua scheduled job.
 
