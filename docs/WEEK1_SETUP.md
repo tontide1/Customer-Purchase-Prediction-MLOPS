@@ -51,11 +51,11 @@ dvc remote modify minio-local endpointurl http://localhost:9000
 
 ### Step 4: Prepare Raw Data
 
-Raw data layer expects CSV files in `data/raw/`.
+Raw data layer expects CSV files in `data/raw/` named `YYYY-Mon.csv` or `YYYY-Mon.csv.gz`.
 
 **Option A: Copy sample data** (already done for testing):
 ```bash
-# Sample file already created: data/raw/2019-Oct-sample.csv.gz
+# Sample file already created: data/raw/2019-Oct.csv.gz
 ls data/raw/
 ```
 
@@ -69,7 +69,7 @@ cp dataset/*.csv.gz data/raw/
 
 Transform raw CSV to bronze parquet:
 ```bash
-python3 training/src/bronze.py
+python3 training/src/bronze.py --window-profile training
 ```
 
 Expected output:
@@ -128,7 +128,7 @@ python3 -m pytest training/tests/test_data_lake.py -v
 ```
 data/
 ├── raw/                    # Immutable source data
-│   └── 2019-Oct-sample.csv.gz
+│   └── 2019-Oct.csv.gz
 ├── bronze/                 # Validated, standardized
 │   └── events.parquet
 ├── silver/                 # Cleaned, deduplicated
@@ -161,6 +161,16 @@ All paths and credentials are centralized in `training/src/config.py`:
 - **SILVER_DATA_PATH**: `data/silver/events.parquet`
 - **GOLD_DATA_DIR**: `data/gold` (for Week 2+)
 - **PREDICTION_HORIZON_MINUTES**: 10 (locked contract)
+- **DATA_WINDOW_PROFILE**: `training` by default (`training`, `replay`, or `all`)
+- **TRAINING_WINDOW_START/END**: `2019-10` -> `2020-02`
+- **REPLAY_WINDOW_START/END**: `2020-03` -> `2020-04`
+
+### Replay Window
+
+If you want to materialize the replay/demo source window instead of training:
+```bash
+python3 training/src/bronze.py --window-profile replay
+```
 
 ## Timestamp Contract
 

@@ -8,6 +8,15 @@ Hệ thống Phân tích & Dự đoán Ý định Mua hàng Thời gian thực
 
 **Trạng thái:** `FREEZE-READY` ✅ (Blueprint/kiến trúc mục tiêu locked & verified)
 
+**Execution profile hiện tại (dev):** `DEV_SMOKE` ✅
+
+> **DEV_SMOKE** là profile chạy nhanh để tăng tốc vòng lặp phát triển, không thay đổi target-state contract của blueprint.
+>
+> - **Train window (dev):** `2019-10` -> `2019-10` (1 file tháng)
+> - **Replay window (dev):** `2020-03` -> `2020-03` (1 file tháng)
+> - **Mục đích:** smoke test pipeline, debug dữ liệu/feature nhanh, giảm thời gian chờ EDA/materialization
+> - **Lưu ý:** trước khi chốt đánh giá chất lượng model, phải quay lại full window theo blueprint (`training`: `2019-10` -> `2020-02`, `replay`: `2020-03` -> `2020-04`)
+
 > **Lưu ý quan trọng:** Blueprint này mô tả **kiến trúc và thiết kế mục tiêu** cho hệ thống. Hiện tại, repository chứa:
 > - ✅ Dataset gốc (`dataset/*.csv.gz`)
 > - ✅ Exploratory Analysis (`notebook/eda.ipynb`)

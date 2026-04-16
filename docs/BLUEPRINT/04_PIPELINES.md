@@ -3,6 +3,11 @@
 > **← Xem [3. Features](03_FEATURES.md)**  
 > **→ Xem [5. Project Structure](05_PROJECT_STRUCTURE.md)**
 
+> **Execution profile (local dev): `DEV_SMOKE`**
+> - Train window (dev): `2019-10` -> `2019-10`
+> - Replay window (dev): `2020-03` -> `2020-03`
+> - Profile này chỉ để tăng tốc vòng lặp phát triển; canonical target-state windows trong blueprint vẫn giữ nguyên.
+
 ---
 
 ## Pipeline A: Training Pipeline (Offline — Chạy 1 lần hoặc khi retrain)
@@ -22,12 +27,14 @@ data/raw/*.csv(.gz) -> Window selection -> Bronze ingestion (chunked, partitione
 
 * **Training window:** `2019-10` -> `2020-02`.
 * **Replay/demo window:** `2020-03` -> `2020-04`.
+* **DEV_SMOKE window (local dev):** training `2019-10` -> `2019-10`, replay `2020-03` -> `2020-03`.
 * **Retraining window:** export từ PostgreSQL rồi re-materialize vào `data/raw/` trước khi chạy pipeline.
 
 **Chi tiết từng bước:**
 
 1. **Select Training Window:** Chọn usage window cho offline training trong raw source pool `data/raw/`.
    * Training pipeline mặc định dùng window `2019-10` -> `2020-02`.
+   * Khi iterate local với `DEV_SMOKE`, dùng `2019-10` -> `2019-10`.
 
 2. **Bronze Ingestion:**
     * Đọc từng file `.csv` hoặc `.csv.gz` trong raw window.

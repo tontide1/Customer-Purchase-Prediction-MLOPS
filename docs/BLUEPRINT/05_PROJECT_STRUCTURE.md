@@ -3,6 +3,11 @@
 > **← Xem [4. Pipelines](04_PIPELINES.md)**  
 > **→ Xem [6. Error Handling](06_ERROR_HANDLING.md)**
 
+> **Execution profile (local dev): `DEV_SMOKE`**
+> - Train window (dev): `2019-10` -> `2019-10`
+> - Replay window (dev): `2020-03` -> `2020-03`
+> - Profile này chỉ để tăng tốc vòng lặp phát triển; canonical target-state windows trong blueprint vẫn giữ nguyên.
+
 ## 5.1. Repository Layout - TARGET STATE
 
 Cấu trúc này mô tả **trạng thái hoàn chỉnh** của repository khi tất cả services, training, monitoring, CI/CD được triển khai đầy đủ:
@@ -262,6 +267,15 @@ class TrainingSettings(BaseSettings):
 
     class Config:
         env_file = ".env"
+```
+
+DEV_SMOKE local override (khuyến nghị khi iterate nhanh):
+
+```env
+TRAINING_WINDOW_START=2019-10
+TRAINING_WINDOW_END=2019-10
+REPLAY_WINDOW_START=2020-03
+REPLAY_WINDOW_END=2020-03
 ```
 
 **File `.env.example`** được commit vào repo, file `.env` thực tế được **gitignored**.

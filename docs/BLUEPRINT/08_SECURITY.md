@@ -3,6 +3,11 @@
 > **← Xem [7. Testing](07_TESTING.md)**  
 > **→ Xem [9. Explainability](09_EXPLAINABILITY.md)**
 
+> **Execution profile (local dev): `DEV_SMOKE`**
+> - Train window (dev): `2019-10` -> `2019-10`
+> - Replay window (dev): `2020-03` -> `2020-03`
+> - Profile này chỉ để tăng tốc vòng lặp phát triển; canonical target-state windows trong blueprint vẫn giữ nguyên.
+
 > **Lưu ý:** Hệ thống chạy trên local (Docker Compose internal network), không expose ra internet.
 > Các biện pháp security dưới đây ở mức phù hợp cho project demo, thể hiện nhận thức security mà không over-engineering.
 

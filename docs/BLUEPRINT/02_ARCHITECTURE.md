@@ -3,6 +3,11 @@
 > **← Xem [1. Overview](01_OVERVIEW.md)**  
 > **→ Xem [3. Features](03_FEATURES.md)**
 
+> **Execution profile (local dev): `DEV_SMOKE`**
+> - Train window (dev): `2019-10` -> `2019-10`
+> - Replay window (dev): `2020-03` -> `2020-03`
+> - Profile này chỉ để tăng tốc vòng lặp phát triển; canonical target-state windows trong blueprint vẫn giữ nguyên.
+
 Hệ thống hoạt động theo mô hình **Event-Driven Microservices**, chia thành 4 tầng:
 
 ```

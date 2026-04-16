@@ -1,50 +1,40 @@
 # AGENTS
 
-## What is real in this repo (today)
-- Treat `docs/BLUEPRINT/*.md` and `BLUEPRINT.md` as target-state design; many snippets are illustrative, not executable.
-- Executable Week 1 data foundation exists in:
-  - `training/src/config.py`, `training/src/bronze.py`, `training/src/silver.py`
-  - `shared/constants.py`, `shared/schemas.py`
-  - `training/tests/test_data_lake.py`
-  - `dvc.yaml` (only `bronze` and `silver` stages)
-- Infra scaffold currently implemented: `docker-compose.yml` + `infra/minio/init-bucket.sh` (MinIO + bucket init only).
-- There is no repo-level `pyproject.toml`, `requirements*.txt`, `Makefile`, pre-commit config, or CI workflow.
-
-## Environment and command baseline
-- Preferred Python env: `conda activate MLOPS` (expected Python 3.11.x in this env).
-- If `python` is unavailable outside conda, use `python3` for scripts.
-- Start local object storage: `docker compose up -d` (MinIO only).
-- Quick health check: `docker compose ps` (MinIO ports `9000` API, `9001` console).
-- Week 1 pipeline commands:
-  - `python training/src/bronze.py --input data/raw --output data/bronze/events.parquet`
-  - `python training/src/silver.py --input data/bronze/events.parquet --output data/silver/events.parquet`
-  - `dvc repro` runs only `bronze` -> `silver` per current `dvc.yaml`.
-
-## Data pipeline gotchas that cause real failures
-- Keep schema field order from `schemas.BRONZE_SCHEMA` / `schemas.SILVER_SCHEMA` when selecting columns; do not build column order from sets.
-- Bronze write path is strict on dtypes (PyArrow schema cast): ensure IDs/categorical fields stay string-like before `pa.Table.from_pandas(...)`.
-- Bronze input reader supports both `*.csv` and `*.csv.gz` under `data/raw/`; avoid hard-coding dataset filenames.
-- Raw layer contract: keep source `event_time`; internal layers must use `source_event_time`.
-
-## Contracts to preserve when touching architecture/docs
-- Canonical `event_id`: `hash(f"{user_session}|{source_event_time}|{event_type}|{product_id}|{user_id}")`.
-- Validation gate is fail-closed except first deployment; manual override requires `override_by`, `override_reason`, `override_time`.
-- `/predict` may fallback; `/explain` must return `503` when explainer is unavailable.
-- Fallback predictions must not be cached and must be excluded from model-quality metrics.
-- Keep online evaluation separated by `evaluation_mode` (`demo_replay` vs `offline_backfill`); never merge metric series.
-- Least privilege rule: prediction API runtime config must not include DVC/MinIO credentials.
-
-## Editing policy for agents
-- Prefer executable source of truth (`dvc.yaml`, `training/src/*.py`, `docker-compose.yml`, scripts) over prose if they conflict.
-- When changing data/serving contracts, sync these blueprint docs in the same change:
-  - `docs/BLUEPRINT/01_OVERVIEW.md`
-  - `docs/BLUEPRINT/02_ARCHITECTURE.md`
-  - `docs/BLUEPRINT/04_PIPELINES.md`
-  - `docs/BLUEPRINT/05_PROJECT_STRUCTURE.md`
-  - `docs/BLUEPRINT/07_TESTING.md`
-
-## Working Style
+## Working Style (IMPORTANT AND DO NOT TOUCH)
 - Ask before guessing when requirements, contracts, or scope are ambiguous.
 - Prefer the smallest correct change; do not add speculative abstractions or knobs.
 - Keep edits surgical; do not refactor or "improve" unrelated code, docs, or formatting.
 - Define success criteria up front and verify them with tests, reads, or direct checks before finishing.
+
+## What Matters Here
+- Treat `docs/BLUEPRINT/*.md` and `BLUEPRINT.md` as target-state design; when they conflict with code, trust executable sources.
+- Real Week 1 code lives in `training/src/{config,bronze,silver}.py`, `shared/{constants,schemas}.py`, `training/tests/test_data_lake.py`, `training/tests/test_raw_window_selection.py`, and `dvc.yaml`.
+- `docker-compose.yml` is MinIO + bucket bootstrap only. There is no repo-level `pyproject.toml`, `requirements*.txt`, `Makefile`, pre-commit config, or CI workflow.
+- Run commands from repo root; scripts add the repo root to `sys.path`, so path assumptions are repo-relative.
+
+## Commands
+- Prefer `conda activate MLOPS`; if `pytest` is missing, use `conda run -n MLOPS python -m pytest ...`.
+- Current working profile: `DEV_SMOKE` (default while iterating locally).
+  - Train window: `2019-10` -> `2019-10`.
+  - Replay window: `2020-03` -> `2020-03`.
+  - Keep target-state contracts unchanged; this profile is only for faster dev loops.
+- Week 1 pipeline:
+  - `python training/src/bronze.py --input data/raw --output data/bronze/events.parquet --window-profile all --window-start 2019-10 --window-end 2019-10`
+  - `python training/src/silver.py --input data/bronze/events.parquet --output data/silver/events.parquet`
+  - `TRAINING_WINDOW_START=2019-10 TRAINING_WINDOW_END=2019-10 dvc repro` runs only bronze -> silver with DEV_SMOKE window.
+- MinIO local stack: `docker compose up -d`; verify with `docker compose ps`.
+- Focused tests:
+  - `conda run -n MLOPS python -m pytest training/tests/test_data_lake.py -v`
+  - `conda run -n MLOPS python -m pytest training/tests/test_raw_window_selection.py -v`
+
+## Contracts That Break Easily
+- Keep schema column order from `schemas.BRONZE_SCHEMA` / `schemas.SILVER_SCHEMA`; do not derive order from sets.
+- Raw layer uses `event_time`; downstream layers use `source_event_time`.
+- Bronze ingest only accepts raw files named `YYYY-Mon.csv` or `YYYY-Mon.csv.gz`; unsupported names are skipped.
+- Canonical raw window defaults remain `training` (`2019-10` -> `2020-02`) and `replay` (`2020-03` -> `2020-04`); `DEV_SMOKE` is a local override for faster iteration.
+- Bronze writes are strict on dtypes: keep IDs/categorical fields string-like before `pa.Table.from_pandas(...)`.
+
+## When Changing Contracts
+- Prefer `dvc.yaml`, `training/src/*.py`, `docker-compose.yml`, and scripts over prose.
+- If changing data/serving contracts, update `docs/BLUEPRINT/01_OVERVIEW.md`, `02_ARCHITECTURE.md`, `04_PIPELINES.md`, `05_PROJECT_STRUCTURE.md`, and `07_TESTING.md` in the same change.
+- Preserve these repo contracts: canonical `event_id`; fail-closed validation gate except first deploy/manual override; `/explain` returns `503` when unavailable; fallback predictions are not cached and are excluded from model-quality metrics; online evaluation stays split by `evaluation_mode`; prediction runtime config must not include DVC/MinIO credentials.

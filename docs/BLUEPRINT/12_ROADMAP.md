@@ -3,6 +3,11 @@
 > **← Xem [11. Demo](11_DEMO.md)**  
 > **→ Xem [BLUEPRINT.md gốc](../../BLUEPRINT.md)**
 
+> **Execution profile (local dev): `DEV_SMOKE`**
+> - Train window (dev): `2019-10` -> `2019-10`
+> - Replay window (dev): `2020-03` -> `2020-03`
+> - Profile này chỉ để tăng tốc vòng lặp phát triển; canonical target-state windows trong blueprint vẫn giữ nguyên.
+
 | Tuần | Milestone | Deliverables |
 | --- | --- | --- |
 | **1** | Data Foundation | `data/raw/`, chunked + partitioned `data/bronze/`, partition-aware `data/silver/`, config paths theo directory semantics, timestamp contract (`source_event_time`, `replay_time`, `prediction_time`), DVC init + MinIO remote setup + bronze memory benchmark report |

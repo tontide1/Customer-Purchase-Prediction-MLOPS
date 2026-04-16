@@ -3,6 +3,11 @@
 > **← Xem [BLUEPRINT.md gốc](../../BLUEPRINT.md)**  
 > **→ Xem [2. Architecture](02_ARCHITECTURE.md)**
 
+> **Execution profile (local dev): `DEV_SMOKE`**
+> - Train window (dev): `2019-10` -> `2019-10`
+> - Replay window (dev): `2020-03` -> `2020-03`
+> - Profile này chỉ để tăng tốc vòng lặp phát triển; canonical target-state windows trong blueprint vẫn giữ nguyên.
+
 ---
 
 ## 1.1. Mục tiêu
@@ -56,6 +61,7 @@ Toàn bộ 7 file tháng được xem là **một raw source pool chung** trong 
 ### Offline Training
 
 * **Training window:** Chọn dữ liệu trong khoảng `2019-10` -> `2020-02`.
+* **DEV_SMOKE override (local dev):** dùng `2019-10` -> `2019-10` để chạy nhanh.
 * **Input chuẩn:** Dùng `data/silver/` để build session index và split assignment, sau đó materialize `data/gold/`.
 * **Đơn vị mẫu huấn luyện:** Không phải một dòng cho cả session đã kết thúc, mà là nhiều **snapshot rows** trên cùng `user_session`.
 * **Quy tắc snapshot:** Tại mỗi thời điểm `t`, feature chỉ được tính từ các event có `source_event_time <= t`.
@@ -66,6 +72,7 @@ Toàn bộ 7 file tháng được xem là **một raw source pool chung** trong 
 ### Online Replay / Demo
 
 * **Replay window:** Chọn dữ liệu trong khoảng `2020-03` -> `2020-04`.
+* **DEV_SMOKE override (local dev):** dùng `2020-03` -> `2020-03` để chạy nhanh.
 * **Nguồn replay:** Đọc từ raw source pool trong `data/raw/`.
 * **Kỹ thuật:** Script replay đọc event, preserve `source_event_time`, gắn thêm `replay_time`, rồi gửi vào hệ thống theo thời gian thực.
 * **Mục đích:** Mô phỏng behavior online thực tế mà không phá vỡ source timeline semantics của dữ liệu gốc.
