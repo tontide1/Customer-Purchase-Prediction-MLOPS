@@ -1,14 +1,11 @@
 """
-Bronze layer pipeline: Raw CSV → Bronze Parquet (chunked streaming).
+Bronze layer pipeline: Raw CSV → Bronze Parquet.
 
 Transforms raw event data from CSV to standardized Parquet format.
-- Reads files in chunks to minimize memory footprint
 - Renames event_time → source_event_time
 - Validates event_type
 - Rejects invalid records
-- Outputs immutable parquet artifact via ParquetWriter append
-
-Memory-efficient: peak RAM ~O(chunksize) instead of O(total_data).
+- Outputs immutable parquet artifact
 """
 
 import argparse
@@ -16,20 +13,11 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Generator, Tuple
-import time
-import gc
+from typing import Tuple
 
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-
-try:
-    import psutil
-
-    HAS_PSUTIL = True
-except ImportError:
-    HAS_PSUTIL = False
 
 # Add parent directory to path for imports
 import sys
@@ -178,6 +166,7 @@ def select_raw_files(
     return selected_files
 
 
+<<<<<<< HEAD
 def get_current_memory_mb() -> float:
     """Get current process memory in MB. Returns 0 if psutil unavailable."""
     if not HAS_PSUTIL:
@@ -200,14 +189,17 @@ def get_dataframe_memory_mb(df: pd.DataFrame) -> float:
 
 
 def discover_raw_files(raw_dir: str) -> list[Path]:
+=======
+def read_raw_csvs(raw_dir: str) -> pd.DataFrame:
+>>>>>>> parent of 7352b21 (fix: sửa lỗi OOM)
     """
-    Discover all CSV files in raw directory.
+    Read all CSV files from raw directory and concatenate.
 
     Args:
         raw_dir: Path to raw data directory
 
     Returns:
-        Sorted list of Path objects for .csv and .csv.gz files
+        Concatenated DataFrame with all raw events
     """
     raw_path = Path(raw_dir)
 
@@ -217,6 +209,7 @@ def discover_raw_files(raw_dir: str) -> list[Path]:
     csv_files = list(raw_path.glob("*.csv"))
     gz_files = list(raw_path.glob("*.csv.gz"))
 
+<<<<<<< HEAD
     all_files = sorted(
         csv_files + gz_files,
         key=lambda file_path: (
@@ -224,10 +217,14 @@ def discover_raw_files(raw_dir: str) -> list[Path]:
             file_path.name,
         ),
     )
+=======
+    all_files = csv_files + gz_files
+>>>>>>> parent of 7352b21 (fix: sửa lỗi OOM)
 
     if not all_files:
         raise FileNotFoundError(f"No CSV files found in {raw_dir}")
 
+<<<<<<< HEAD
     logger.info(f"Discovered {len(all_files)} raw file(s) to process")
     for f in all_files:
         logger.info(f"  - {f.name}")
@@ -263,43 +260,39 @@ def read_raw_chunks(
 
     for file_path in all_files:
         logger.info(f"\nProcessing {file_path.name}...")
+=======
+    logger.info(f"Found {len(all_files)} raw file(s) to process")
+>>>>>>> parent of 7352b21 (fix: sửa lỗi OOM)
 
+    dfs = []
+    for file_path in sorted(all_files):
+        logger.info(f"Reading {file_path.name}...")
         try:
             if str(file_path).endswith(".gz"):
-                reader = pd.read_csv(
+                df = pd.read_csv(
                     file_path,
                     compression="gzip",
                     dtype=RAW_CSV_DTYPES,
-                    chunksize=chunksize,
                 )
             else:
-                reader = pd.read_csv(
-                    file_path,
-                    dtype=RAW_CSV_DTYPES,
-                    chunksize=chunksize,
-                )
-
-            for chunk_idx, chunk in enumerate(reader, start=1):
-                logger.debug(
-                    f"  Chunk {chunk_idx}: {len(chunk)} rows | "
-                    f"RAM: {get_current_memory_mb():.1f} MB | "
-                    f"DF: {get_dataframe_memory_mb(chunk):.1f} MB"
-                )
-                yield file_path, chunk
-
+                df = pd.read_csv(file_path, dtype=RAW_CSV_DTYPES)
+            dfs.append(df)
+            logger.info(f"  ✓ Read {len(df)} rows from {file_path.name}")
         except Exception as e:
             logger.error(f"  ✗ Error reading {file_path.name}: {e}")
             raise
 
+    return pd.concat(dfs, ignore_index=True)
 
-def parse_event_time_chunk(df: pd.DataFrame) -> pd.DataFrame:
+
+def parse_event_time(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Parse event_time string to timestamp in-place on chunk.
+    Parse event_time string to timestamp.
 
     Input format: "2019-10-01 00:00:00 UTC"
 
     Args:
-        df: Input DataFrame with event_time column (modified in-place)
+        df: Input DataFrame with event_time column
 
     Returns:
         DataFrame with parsed event_time as timestamp
@@ -311,19 +304,9 @@ def parse_event_time_chunk(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def parse_event_time(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Backward-compatible wrapper for parse_event_time_chunk.
-    Used in tests and standalone script calls.
-    """
-    return parse_event_time_chunk(df)
-
-
 def validate_event_type(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
     """
     Filter records with valid event_type.
-
-    Returns view (not copy) to save memory; caller must copy if needed.
 
     Args:
         df: Input DataFrame
@@ -339,44 +322,44 @@ def validate_event_type(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
         invalid_types = df.loc[~mask, "event_type"].unique()
         logger.warning(f"  Invalid types found: {invalid_types}")
 
-    return df[mask], num_rejected
+    return df[mask].copy(), num_rejected
 
 
-def transform_to_bronze_chunk(df: pd.DataFrame) -> pd.DataFrame:
+def transform_to_bronze(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Transform raw DataFrame chunk to bronze schema.
+    Transform raw DataFrame to bronze schema.
 
     - Rename event_time → source_event_time
-    - Select only schema fields in correct order
-    - Minimal dtype casting (only when needed)
+    - Select only schema fields
+    - Ensure correct dtypes
 
     Args:
         df: Input raw DataFrame (with parsed event_time)
 
     Returns:
-        Bronze-formatted DataFrame ready for Arrow conversion
+        Bronze-formatted DataFrame
     """
     # Rename event_time to source_event_time
     df = df.rename(
         columns={constants.FIELD_EVENT_TIME: constants.FIELD_SOURCE_EVENT_TIME}
     )
 
-    # Cast only if needed: check current dtype before conversion
+    # Enforce dtypes compatible with BRONZE_SCHEMA
     for column in BRONZE_STRING_COLUMNS:
-        if column in df.columns and df[column].dtype != "string":
+        if column in df.columns:
             df[column] = df[column].astype("string")
 
-    # Cast price only if it exists and is not already float64
-    if "price" in df.columns and df["price"].dtype != "float64":
+    if "price" in df.columns:
         df["price"] = pd.to_numeric(df["price"], errors="coerce")
 
-    # Select only schema fields (in order), avoiding unnecessary copy
+    # Select only schema fields (in order)
     bronze_fields = [field.name for field in schemas.BRONZE_SCHEMA]
     df = df[bronze_fields]
 
     return df
 
 
+<<<<<<< HEAD
 def transform_to_bronze(df: pd.DataFrame) -> pd.DataFrame:
     """
     Backward-compatible wrapper for transform_to_bronze_chunk.
@@ -520,10 +503,15 @@ def write_bronze_parquet_chunked(
     return stats
 
 
+=======
+>>>>>>> parent of 7352b21 (fix: sửa lỗi OOM)
 def write_bronze_parquet(df: pd.DataFrame, output_path: str) -> None:
     """
-    Backward-compatible wrapper: write single DataFrame to parquet.
-    Used in tests and full-load scenarios (not chunked).
+    Write DataFrame to Parquet file with bronze schema.
+
+    Args:
+        df: Input DataFrame
+        output_path: Path to output parquet file
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -539,7 +527,7 @@ def write_bronze_parquet(df: pd.DataFrame, output_path: str) -> None:
 def main():
     """Main entry point for bronze pipeline."""
     parser = argparse.ArgumentParser(
-        description="Transform raw CSV data to bronze parquet format (chunked streaming)"
+        description="Transform raw CSV data to bronze parquet format"
     )
     parser.add_argument(
         "--input",
@@ -551,6 +539,7 @@ def main():
         default=Config.BRONZE_DATA_PATH,
         help=f"Path to bronze output parquet file (default: {Config.BRONZE_DATA_PATH})",
     )
+<<<<<<< HEAD
     parser.add_argument(
         "--window-profile",
         default=Config.DATA_WINDOW_PROFILE,
@@ -585,10 +574,13 @@ def main():
         dest="memory_log",
         help="Disable memory telemetry logging",
     )
+=======
+>>>>>>> parent of 7352b21 (fix: sửa lỗi OOM)
 
     args = parser.parse_args()
 
     logger.info("=" * 70)
+<<<<<<< HEAD
     logger.info("BRONZE PIPELINE: Raw CSV → Bronze Parquet (Chunked Streaming)")
     logger.info("=" * 70)
     logger.info(f"Input directory: {args.input}")
@@ -616,11 +608,43 @@ def main():
             window_start=args.window_start,
             window_end=args.window_end,
         )
+=======
+    logger.info("BRONZE PIPELINE: Raw CSV → Bronze Parquet")
+    logger.info("=" * 70)
+
+    try:
+        # Read raw CSVs
+        logger.info(f"\n1. Reading raw data from {args.input}...")
+        df_raw = read_raw_csvs(args.input)
+        initial_count = len(df_raw)
+        logger.info(f"   Total rows read: {initial_count}")
+
+        # Parse event_time
+        logger.info("\n2. Parsing event_time...")
+        df_raw = parse_event_time(df_raw)
+        logger.info("   ✓ Event time parsed")
+
+        # Validate event_type
+        logger.info("\n3. Validating event_type...")
+        df_valid, num_rejected = validate_event_type(df_raw)
+        logger.info(f"   Valid records: {len(df_valid)}")
+        logger.info(f"   Rejected records: {num_rejected}")
+
+        # Transform to bronze schema
+        logger.info("\n4. Transforming to bronze schema...")
+        df_bronze = transform_to_bronze(df_valid)
+        logger.info(f"   ✓ Renamed event_time → {constants.FIELD_SOURCE_EVENT_TIME}")
+
+        # Write output
+        logger.info(f"\n5. Writing bronze artifact...")
+        write_bronze_parquet(df_bronze, args.output)
+>>>>>>> parent of 7352b21 (fix: sửa lỗi OOM)
 
         # Summary
         logger.info("\n" + "=" * 70)
         logger.info("BRONZE PIPELINE SUMMARY")
         logger.info("=" * 70)
+<<<<<<< HEAD
         logger.info(f"Input rows:      {stats['total_rows_in']:,}")
         logger.info(f"Valid rows:      {stats['total_rows_valid']:,}")
         logger.info(f"Rejected rows:   {stats['total_rows_rejected']:,}")
@@ -640,6 +664,12 @@ def main():
             logger.info(f"Final RAM:       {stats['final_memory_mb']:.1f} MB")
             logger.info(f"RAM delta:       {stats['peak_memory_delta_mb']:+.1f} MB")
         logger.info(f"Output file:     {args.output}")
+=======
+        logger.info(f"Input rows:     {initial_count}")
+        logger.info(f"Rejected:       {num_rejected}")
+        logger.info(f"Output rows:    {len(df_bronze)}")
+        logger.info(f"Output file:    {args.output}")
+>>>>>>> parent of 7352b21 (fix: sửa lỗi OOM)
         logger.info("=" * 70)
 
     except Exception as e:
