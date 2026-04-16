@@ -15,13 +15,16 @@
 ## Commands
 - Prefer `conda activate MLOPS`; if `pytest` is missing, use `conda run -n MLOPS python -m pytest ...`.
 - Current working profile: `DEV_SMOKE` (default while iterating locally).
-  - Train window: `2019-10` -> `2019-10`.
-  - Replay window: `2020-03` -> `2020-03`.
+  - Train window: `2019-10` -> `2019-10` (uses TRAINING_WINDOW_START/END env vars)
+  - Replay window: `2020-03` -> `2020-03`
   - Keep target-state contracts unchanged; this profile is only for faster dev loops.
+- Canonical windows (for production/final evaluation):
+  - Training: `2019-10` -> `2020-02`
+  - Replay: `2020-03` -> `2020-04`
 - Week 1 pipeline:
-  - `python training/src/bronze.py --input data/raw --output data/bronze/events.parquet --window-profile all --window-start 2019-10 --window-end 2019-10`
+  - `python training/src/bronze.py --input data/raw --output data/bronze/events.parquet --window-profile dev_smoke`
   - `python training/src/silver.py --input data/bronze/events.parquet --output data/silver/events.parquet`
-  - `TRAINING_WINDOW_START=2019-10 TRAINING_WINDOW_END=2019-10 dvc repro` runs only bronze -> silver with DEV_SMOKE window.
+  - `dvc repro` runs bronze -> silver with DEV_SMOKE window (default).
 - MinIO local stack: `docker compose up -d`; verify with `docker compose ps`.
 - Focused tests:
   - `conda run -n MLOPS python -m pytest training/tests/test_data_lake.py -v`

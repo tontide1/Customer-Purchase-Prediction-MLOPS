@@ -5,7 +5,7 @@
 stages:
   bronze:
     desc: "Transform raw CSV to bronze parquet (event_time → source_event_time)"
-    cmd: python training/src/bronze.py --input data/raw --output data/bronze/events.parquet
+    cmd: python training/src/bronze.py --input data/raw --output data/bronze/events.parquet --window-profile dev_smoke
     deps:
       - training/src/bronze.py
       - training/src/config.py

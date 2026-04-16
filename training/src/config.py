@@ -22,6 +22,17 @@ class Config:
     GOLD_DATA_DIR = os.getenv("GOLD_DATA_DIR", "data/gold")
 
     # ========================================================================
+    # Raw Window Selection
+    # ========================================================================
+    DATA_WINDOW_PROFILE = os.getenv("DATA_WINDOW_PROFILE", "dev_smoke")
+    TRAINING_WINDOW_START = os.getenv("TRAINING_WINDOW_START", "2019-10")
+    TRAINING_WINDOW_END = os.getenv("TRAINING_WINDOW_END", "2020-02")
+    DEV_SMOKE_WINDOW_START = os.getenv("DEV_SMOKE_WINDOW_START", "2019-10")
+    DEV_SMOKE_WINDOW_END = os.getenv("DEV_SMOKE_WINDOW_END", "2019-10")
+    REPLAY_WINDOW_START = os.getenv("REPLAY_WINDOW_START", "2020-03")
+    REPLAY_WINDOW_END = os.getenv("REPLAY_WINDOW_END", "2020-04")
+
+    # ========================================================================
     # Prediction Contract
     # ========================================================================
     # Locked for Week 1: 10-minute window for next event prediction
@@ -66,6 +77,26 @@ class Config:
         return True
 
     @classmethod
+    def get_window_bounds(
+        cls, profile: str | None = None
+    ) -> tuple[str | None, str | None]:
+        """Return inclusive raw window bounds for a profile."""
+        selected_profile = (profile or cls.DATA_WINDOW_PROFILE).strip().lower()
+
+        if selected_profile == "training":
+            return cls.TRAINING_WINDOW_START, cls.TRAINING_WINDOW_END
+        if selected_profile == "replay":
+            return cls.REPLAY_WINDOW_START, cls.REPLAY_WINDOW_END
+        if selected_profile == "dev_smoke":
+            return cls.DEV_SMOKE_WINDOW_START, cls.DEV_SMOKE_WINDOW_END
+        if selected_profile == "all":
+            return None, None
+
+        raise ValueError(
+            f"Unknown DATA_WINDOW_PROFILE '{selected_profile}'. Expected training, replay, dev_smoke, or all."
+        )
+
+    @classmethod
     def get_all_settings(cls) -> dict:
         """Return all current settings as a dictionary (for debugging/logging)."""
         return {
@@ -73,6 +104,13 @@ class Config:
             "bronze_data_path": cls.BRONZE_DATA_PATH,
             "silver_data_path": cls.SILVER_DATA_PATH,
             "gold_data_dir": cls.GOLD_DATA_DIR,
+            "data_window_profile": cls.DATA_WINDOW_PROFILE,
+            "training_window_start": cls.TRAINING_WINDOW_START,
+            "training_window_end": cls.TRAINING_WINDOW_END,
+            "dev_smoke_window_start": cls.DEV_SMOKE_WINDOW_START,
+            "dev_smoke_window_end": cls.DEV_SMOKE_WINDOW_END,
+            "replay_window_start": cls.REPLAY_WINDOW_START,
+            "replay_window_end": cls.REPLAY_WINDOW_END,
             "prediction_horizon_minutes": cls.PREDICTION_HORIZON_MINUTES,
             "dvc_remote_name": cls.DVC_REMOTE_NAME,
             "dvc_remote_url": cls.DVC_REMOTE_URL,

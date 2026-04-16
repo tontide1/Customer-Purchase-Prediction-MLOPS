@@ -69,7 +69,7 @@ cp dataset/*.csv.gz data/raw/
 
 Transform raw CSV to bronze parquet:
 ```bash
-python3 training/src/bronze.py --window-profile training
+python3 training/src/bronze.py --window-profile dev_smoke
 ```
 
 Expected output:
@@ -161,8 +161,9 @@ All paths and credentials are centralized in `training/src/config.py`:
 - **SILVER_DATA_PATH**: `data/silver/events.parquet`
 - **GOLD_DATA_DIR**: `data/gold` (for Week 2+)
 - **PREDICTION_HORIZON_MINUTES**: 10 (locked contract)
-- **DATA_WINDOW_PROFILE**: `training` by default (`training`, `replay`, or `all`)
+- **DATA_WINDOW_PROFILE**: `dev_smoke` by default (`training`, `replay`, `dev_smoke`, or `all`)
 - **TRAINING_WINDOW_START/END**: `2019-10` -> `2020-02`
+- **DEV_SMOKE_WINDOW_START/END**: `2019-10` -> `2019-10`
 - **REPLAY_WINDOW_START/END**: `2020-03` -> `2020-04`
 
 ### Replay Window
@@ -170,6 +171,13 @@ All paths and credentials are centralized in `training/src/config.py`:
 If you want to materialize the replay/demo source window instead of training:
 ```bash
 python3 training/src/bronze.py --window-profile replay
+```
+
+### Training Window
+
+To materialize the canonical training source window:
+```bash
+python3 training/src/bronze.py --window-profile training
 ```
 
 ## Timestamp Contract
@@ -189,7 +197,7 @@ python3 training/src/bronze.py --window-profile replay
 ### Silver Layer
 - ✓ Required fields (event_time/source_event_time, event_type, product_id, user_id, user_session) must not be null
 - ✓ price must be > 0 (or null for non-commerce events)
-- ✓ Records sorted by user_session + source_event_time
+- ✓ Records sorted by user_session + source_event_time + event_type + product_id + user_id
 
 ## Troubleshooting
 

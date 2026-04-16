@@ -13,6 +13,8 @@ Memory-efficient: peak RAM ~O(chunksize) instead of O(total_data).
 
 import argparse
 import logging
+import re
+from datetime import datetime
 from pathlib import Path
 from typing import Generator, Tuple
 import time
@@ -63,6 +65,118 @@ BRONZE_STRING_COLUMNS = [
     "brand",
 ]
 
+WINDOW_FILE_PATTERN = re.compile(
+    r"^(?P<year>\d{4})-(?P<month>[A-Za-z]{3})\.csv(?:\.gz)?$"
+)
+
+
+def parse_window_month(window_value: str) -> datetime:
+    """Parse an inclusive window boundary in YYYY-MM format."""
+    return datetime.strptime(window_value, "%Y-%m")
+
+
+def extract_raw_file_month(file_path: Path) -> datetime | None:
+    """Extract month from a raw CSV filename or return None if unsupported."""
+    match = WINDOW_FILE_PATTERN.match(file_path.name)
+    if not match:
+        return None
+
+    return datetime.strptime(f"{match.group('year')}-{match.group('month')}", "%Y-%b")
+
+
+def resolve_raw_window_bounds(
+    window_profile: str | None = None,
+    window_start: str | None = None,
+    window_end: str | None = None,
+) -> tuple[datetime | None, datetime | None, str]:
+    """Resolve effective raw window bounds from profile and overrides."""
+    profile = (window_profile or Config.DATA_WINDOW_PROFILE).strip().lower()
+
+    if (window_start is None) != (window_end is None):
+        raise ValueError("window_start and window_end must be provided together")
+
+    if window_start is not None and window_end is not None:
+        start_month = parse_window_month(window_start)
+        end_month = parse_window_month(window_end)
+        if start_month > end_month:
+            raise ValueError("window_start must be earlier than or equal to window_end")
+        return start_month, end_month, profile
+
+    profile_start, profile_end = Config.get_window_bounds(profile)
+    if profile_start is None or profile_end is None:
+        return None, None, profile
+
+    start_month = parse_window_month(profile_start)
+    end_month = parse_window_month(profile_end)
+    if start_month > end_month:
+        raise ValueError(f"Invalid window bounds for profile '{profile}'")
+    return start_month, end_month, profile
+
+
+def select_raw_files(
+    raw_dir: str,
+    window_profile: str | None = None,
+    window_start: str | None = None,
+    window_end: str | None = None,
+) -> list[Path]:
+    """Select raw files for the requested window."""
+    all_files = discover_raw_files(raw_dir)
+    start_month, end_month, profile = resolve_raw_window_bounds(
+        window_profile=window_profile,
+        window_start=window_start,
+        window_end=window_end,
+    )
+
+    selected_files: list[Path] = []
+    skipped_files: list[str] = []
+
+    for file_path in all_files:
+        file_month = extract_raw_file_month(file_path)
+        if file_month is None:
+            skipped_files.append(file_path.name)
+            continue
+
+        if start_month is None or end_month is None:
+            selected_files.append(file_path)
+            continue
+
+        if start_month <= file_month <= end_month:
+            selected_files.append(file_path)
+
+    if skipped_files:
+        logger.warning(
+            "Skipping raw files with unsupported names: %s", ", ".join(skipped_files)
+        )
+
+    if not selected_files and (start_month is None or end_month is None):
+        raise FileNotFoundError(
+            f"No supported raw files found for profile '{profile}' in {raw_dir}"
+        )
+
+    if not selected_files:
+        raise FileNotFoundError(
+            f"No raw files found for window {start_month:%Y-%m} -> {end_month:%Y-%m} in {raw_dir}"
+        )
+
+    if start_month is None or end_month is None:
+        logger.info(
+            "Selected %d raw file(s) for profile '%s' (all supported files)",
+            len(selected_files),
+            profile,
+        )
+    else:
+        logger.info(
+            "Selected %d raw file(s) for profile '%s' (%s -> %s)",
+            len(selected_files),
+            profile,
+            start_month.strftime("%Y-%m"),
+            end_month.strftime("%Y-%m"),
+        )
+    for file_path in selected_files:
+        logger.info("  - %s", file_path.name)
+
+    return selected_files
+
 
 def get_current_memory_mb() -> float:
     """Get current process memory in MB. Returns 0 if psutil unavailable."""
@@ -85,7 +199,7 @@ def get_dataframe_memory_mb(df: pd.DataFrame) -> float:
         return 0.0
 
 
-def discover_raw_files(raw_dir: str) -> list:
+def discover_raw_files(raw_dir: str) -> list[Path]:
     """
     Discover all CSV files in raw directory.
 
@@ -103,7 +217,13 @@ def discover_raw_files(raw_dir: str) -> list:
     csv_files = list(raw_path.glob("*.csv"))
     gz_files = list(raw_path.glob("*.csv.gz"))
 
-    all_files = sorted(csv_files + gz_files)
+    all_files = sorted(
+        csv_files + gz_files,
+        key=lambda file_path: (
+            extract_raw_file_month(file_path) or datetime.max,
+            file_path.name,
+        ),
+    )
 
     if not all_files:
         raise FileNotFoundError(f"No CSV files found in {raw_dir}")
@@ -116,7 +236,11 @@ def discover_raw_files(raw_dir: str) -> list:
 
 
 def read_raw_chunks(
-    raw_dir: str, chunksize: int = 200000
+    raw_dir: str,
+    chunksize: int = 200000,
+    window_profile: str | None = None,
+    window_start: str | None = None,
+    window_end: str | None = None,
 ) -> Generator[Tuple[Path, pd.DataFrame], None, None]:
     """
     Generator: yield chunks from each raw CSV file.
@@ -130,7 +254,12 @@ def read_raw_chunks(
     Yields:
         (file_path, chunk_df) tuples
     """
-    all_files = discover_raw_files(raw_dir)
+    all_files = select_raw_files(
+        raw_dir,
+        window_profile=window_profile,
+        window_start=window_start,
+        window_end=window_end,
+    )
 
     for file_path in all_files:
         logger.info(f"\nProcessing {file_path.name}...")
@@ -261,6 +390,9 @@ def write_bronze_parquet_chunked(
     output_path: str,
     chunksize: int = 200000,
     memory_log: bool = True,
+    window_profile: str | None = None,
+    window_start: str | None = None,
+    window_end: str | None = None,
 ) -> dict:
     """
     Write bronze artifact from raw CSVs using chunked streaming + ParquetWriter.
@@ -279,6 +411,12 @@ def write_bronze_parquet_chunked(
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    start_month, end_month, resolved_profile = resolve_raw_window_bounds(
+        window_profile=window_profile,
+        window_start=window_start,
+        window_end=window_end,
+    )
+
     writer = None
     total_rows_in = 0
     total_rows_valid = 0
@@ -288,7 +426,13 @@ def write_bronze_parquet_chunked(
     start_memory_mb = get_current_memory_mb()
 
     try:
-        for file_path, chunk in read_raw_chunks(raw_dir, chunksize=chunksize):
+        for file_path, chunk in read_raw_chunks(
+            raw_dir,
+            chunksize=chunksize,
+            window_profile=window_profile,
+            window_start=window_start,
+            window_end=window_end,
+        ):
             chunk_count += 1
             rows_in_chunk = len(chunk)
             total_rows_in += rows_in_chunk
@@ -359,6 +503,9 @@ def write_bronze_parquet_chunked(
     avg_throughput = total_rows_in / elapsed_total if elapsed_total > 0 else 0
 
     stats = {
+        "window_profile": resolved_profile,
+        "window_start": start_month.strftime("%Y-%m") if start_month else None,
+        "window_end": end_month.strftime("%Y-%m") if end_month else None,
         "total_rows_in": total_rows_in,
         "total_rows_valid": total_rows_valid,
         "total_rows_rejected": total_rows_rejected,
@@ -405,6 +552,22 @@ def main():
         help=f"Path to bronze output parquet file (default: {Config.BRONZE_DATA_PATH})",
     )
     parser.add_argument(
+        "--window-profile",
+        default=Config.DATA_WINDOW_PROFILE,
+        choices=["training", "replay", "dev_smoke", "all"],
+        help=(f"Raw window profile to ingest (default: {Config.DATA_WINDOW_PROFILE})"),
+    )
+    parser.add_argument(
+        "--window-start",
+        default=None,
+        help="Custom inclusive raw window start in YYYY-MM format",
+    )
+    parser.add_argument(
+        "--window-end",
+        default=None,
+        help="Custom inclusive raw window end in YYYY-MM format",
+    )
+    parser.add_argument(
         "--chunksize",
         type=int,
         default=200000,
@@ -430,6 +593,9 @@ def main():
     logger.info("=" * 70)
     logger.info(f"Input directory: {args.input}")
     logger.info(f"Output file:     {args.output}")
+    logger.info(f"Window profile:  {args.window_profile}")
+    if args.window_start and args.window_end:
+        logger.info(f"Window range:    {args.window_start} -> {args.window_end}")
     logger.info(f"Chunksize:       {args.chunksize:,} rows")
     logger.info(f"Memory telemetry: {'enabled' if args.memory_log else 'disabled'}")
     if not HAS_PSUTIL and args.memory_log:
@@ -446,6 +612,9 @@ def main():
             args.output,
             chunksize=args.chunksize,
             memory_log=args.memory_log,
+            window_profile=args.window_profile,
+            window_start=args.window_start,
+            window_end=args.window_end,
         )
 
         # Summary
@@ -458,6 +627,11 @@ def main():
         logger.info(
             f"Reject rate:     {stats['total_rows_rejected'] / max(stats['total_rows_in'], 1) * 100:.2f}%"
         )
+        logger.info(f"Window profile:  {stats['window_profile']}")
+        if stats["window_start"] and stats["window_end"]:
+            logger.info(
+                f"Window range:    {stats['window_start']} -> {stats['window_end']}"
+            )
         logger.info(f"Chunks processed: {stats['chunk_count']}")
         logger.info(f"Total time:      {stats['elapsed_seconds']:.2f}s")
         logger.info(f"Throughput:      {stats['throughput_rows_per_sec']:.0f} rows/s")

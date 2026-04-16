@@ -65,7 +65,7 @@ env/
 # MLOps artifacts
 mlruns/
 .mlflow/
-dvc.lock
+# dvc.lock
 .dvc/cache
 outputs/
 models/

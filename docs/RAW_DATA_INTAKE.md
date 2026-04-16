@@ -20,13 +20,15 @@ The `data/raw/` layer is the entry point for the data pipeline. It serves as an 
 ## Intake Process
 1. Raw CSV files from `dataset/` are unpacked and staged into `data/raw/`
 2. Files preserve original field names and values exactly (no transformations)
-3. Multiple CSV files can be ingested; they are concatenated in the raw layer
+3. Bronze ingestion only considers files named `YYYY-Mon.csv` or `YYYY-Mon.csv.gz`; unsupported names are skipped
+4. Multiple CSV files can be ingested; selected files are read in chronological filename order
 
 ## Raw Layer Contract
 - **Immutability**: Records in `data/raw/` are never modified
 - **Field Names**: Original source field names are preserved
 - **Timestamp Field**: Uses `event_time` (not `source_event_time`)
-- **No Filtering**: All records from source are kept (even invalid ones)
+- **No Row Filtering at Raw Layer**: Raw files are stored as-is; validation/filtering happens in bronze
+- **Windowed Ingestion**: Bronze selects files by `--window-profile` (training, replay, dev_smoke, or all)
 - **Audit Trail**: Source file and ingestion time can be tracked if needed in future iterations
 
 ## Downstream Transformation
@@ -39,7 +41,7 @@ The `data/raw/` layer is the entry point for the data pipeline. It serves as an 
 ## Week 1 Scope
 For Week 1, we assume:
 - A single raw input file (or multiple files) is present in `data/raw/`
-- The `bronze.py` script processes all files in `data/raw/` directory
+- The `bronze.py` script processes only files in the active raw window profile
 - The raw layer is populated manually or via a setup script (not automated yet)
 
 ## Future (Week 2+)
