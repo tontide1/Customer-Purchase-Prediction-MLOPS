@@ -151,6 +151,26 @@ def test_run_silver_pipeline_streams_batches_and_global_dedups(tmp_path):
     assert output_schema == schemas.SILVER_SCHEMA
 
 
+def test_run_silver_pipeline_keeps_first_duplicate_by_input_order(tmp_path):
+    bronze_file = tmp_path / "bronze.parquet"
+    output_file = tmp_path / "silver.parquet"
+
+    df = _sample_silver_df()
+    later_duplicate = df.iloc[[0]].copy()
+    later_duplicate["brand"] = "later-brand"
+    later_duplicate["price"] = 99.0
+    df = pd.concat([df.iloc[[0]], df.iloc[[1]], later_duplicate], ignore_index=True)
+    table = pa.Table.from_pandas(df, schema=schemas.BRONZE_SCHEMA)
+    pq.write_table(table, bronze_file)
+
+    run_silver_pipeline(str(bronze_file), str(output_file), batch_size=1)
+
+    round_trip = read_bronze_parquet(str(output_file))
+    row = round_trip[round_trip["product_id"] == "2"].iloc[0]
+    assert row["brand"] == "b2"
+    assert row["price"] == 20.0
+
+
 def test_run_silver_pipeline_is_stable_across_repeated_runs(tmp_path):
     bronze_file = tmp_path / "bronze.parquet"
     output_one = tmp_path / "silver-one.parquet"

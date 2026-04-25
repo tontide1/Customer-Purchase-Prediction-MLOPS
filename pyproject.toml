@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "iuh-final-mlops"
 version = "0.1.0"
 description = "Week 1 data foundation pipeline for the IUH MLOps final project."
-readme = { text = "IUH MLOps final project data foundation package.", content-type = "text/markdown" }
+readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dependencies = [
     "pandas==3.0.2",

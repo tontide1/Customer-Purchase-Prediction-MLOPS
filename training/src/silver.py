@@ -12,6 +12,7 @@ Cleans and prepares bronze data for modeling:
 import argparse
 from collections.abc import Iterator
 from dataclasses import dataclass
+import heapq
 import logging
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -38,6 +39,7 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_SILVER_BATCH_SIZE = 200000
+SILVER_INPUT_ORDER_COLUMN = "_silver_input_order"
 
 SILVER_STRING_COLUMNS = [
     "event_type",
@@ -58,6 +60,7 @@ class SilverPipelineStats:
     rejected_rows: int = 0
     duplicate_rows: int = 0
     output_rows: int = 0
+    next_input_order: int = 0
 
 
 def get_silver_sort_columns(df: pd.DataFrame) -> list[str]:
@@ -72,6 +75,11 @@ def get_silver_sort_columns(df: pd.DataFrame) -> list[str]:
         Ordered column names used for deterministic sorting.
     """
     return list(constants.DEDUP_KEY_FIELDS)
+
+
+def get_silver_output_fields() -> list[str]:
+    """Return silver output columns ordered exactly as SILVER_SCHEMA."""
+    return [field.name for field in schemas.SILVER_SCHEMA]
 
 
 def validate_silver_sort_columns(df: pd.DataFrame) -> None:
@@ -319,6 +327,26 @@ def empty_silver_dataframe() -> pd.DataFrame:
     return table.to_pandas()
 
 
+def get_silver_working_fields() -> list[str]:
+    """Return temporary working columns used during external sort/dedup."""
+    return get_silver_output_fields() + [SILVER_INPUT_ORDER_COLUMN]
+
+
+def add_input_order(df: pd.DataFrame, stats: SilverPipelineStats) -> pd.DataFrame:
+    """
+    Add a monotonic source-order column for deterministic global deduplication.
+
+    The final output is sorted by canonical event key, but duplicate keys must
+    keep the first surviving record from bronze input order. This temporary
+    column makes that possible during the external merge step.
+    """
+    start_order = stats.next_input_order
+    end_order = start_order + len(df)
+    df[SILVER_INPUT_ORDER_COLUMN] = range(start_order, end_order)
+    stats.next_input_order = end_order
+    return df
+
+
 def write_cleaned_silver_batch_parts(
     bronze_path: str,
     parts_dir: str,
@@ -334,7 +362,6 @@ def write_cleaned_silver_batch_parts(
     parts_path.mkdir(parents=True, exist_ok=True)
 
     stats = SilverPipelineStats()
-    silver_fields = [field.name for field in schemas.SILVER_SCHEMA]
     part_index = 0
 
     for batch in iter_bronze_batches(bronze_path, batch_size=batch_size):
@@ -346,8 +373,9 @@ def write_cleaned_silver_batch_parts(
         if df.empty:
             continue
 
-        df = df[silver_fields]
-        table = pa.Table.from_pandas(df, schema=schemas.SILVER_SCHEMA)
+        df = add_input_order(df, stats)
+        df = df[get_silver_working_fields()]
+        table = pa.Table.from_pandas(df, preserve_index=False)
         part_path = parts_path / f"part-{part_index:05d}.parquet"
         pq.write_table(table, part_path, compression="snappy")
         logger.info(f"  Wrote cleaned silver batch part: {part_path}")
@@ -356,31 +384,209 @@ def write_cleaned_silver_batch_parts(
     return stats
 
 
+def get_silver_merge_columns() -> list[str]:
+    """Return columns used for sorted runs and merge ordering."""
+    return list(constants.DEDUP_KEY_FIELDS) + [SILVER_INPUT_ORDER_COLUMN]
+
+
+def sort_silver_working_frame(df: pd.DataFrame) -> pd.DataFrame:
+    """Sort a working silver batch by canonical key plus input order."""
+    return df.sort_values(
+        by=get_silver_merge_columns(),
+        ascending=True,
+        kind="mergesort",
+    ).reset_index(drop=True)
+
+
+def write_sorted_silver_runs(
+    parts_dir: str,
+    runs_dir: str,
+    batch_size: int = DEFAULT_SILVER_BATCH_SIZE,
+) -> list[Path]:
+    """
+    Sort cleaned working parts into bounded parquet runs.
+
+    Each run is at most one configured batch in memory. Runs are later merged
+    with a heap so finalize memory is O(batch size * run count), not O(total
+    cleaned rows).
+    """
+    runs_path = Path(runs_dir)
+    runs_path.mkdir(parents=True, exist_ok=True)
+
+    run_paths: list[Path] = []
+    source = ds.dataset(parts_dir, format="parquet")
+    for run_index, batch in enumerate(source.to_batches(batch_size=batch_size)):
+        df = batch.to_pandas()
+        if df.empty:
+            continue
+
+        df = enforce_silver_dtypes(df)
+        df[SILVER_INPUT_ORDER_COLUMN] = pd.to_numeric(
+            df[SILVER_INPUT_ORDER_COLUMN],
+            errors="raise",
+        ).astype("int64")
+        df = sort_silver_working_frame(df[get_silver_working_fields()])
+
+        run_path = runs_path / f"run-{run_index:05d}.parquet"
+        table = pa.Table.from_pandas(df, preserve_index=False)
+        pq.write_table(table, run_path, compression="snappy")
+        run_paths.append(run_path)
+        logger.info(f"  Wrote sorted silver run: {run_path}")
+
+    return run_paths
+
+
+def iter_parquet_rows(path: Path, batch_size: int) -> Iterator[dict]:
+    """Yield rows from a parquet file without loading the full file."""
+    parquet_file = pq.ParquetFile(path)
+    for batch in parquet_file.iter_batches(batch_size=batch_size):
+        df = batch.to_pandas()
+        for row in df.to_dict(orient="records"):
+            yield row
+
+
+def row_merge_key(row: dict) -> tuple:
+    """Return the heap key for a working silver row."""
+    return tuple(row[column] for column in get_silver_merge_columns())
+
+
+def row_dedup_key(row: dict) -> tuple:
+    """Return the canonical deduplication key for a working silver row."""
+    return tuple(row[column] for column in constants.DEDUP_KEY_FIELDS)
+
+
+def iter_merged_unique_rows(
+    run_paths: list[Path],
+    stats: SilverPipelineStats,
+    batch_size: int = DEFAULT_SILVER_BATCH_SIZE,
+) -> Iterator[dict]:
+    """
+    Merge sorted runs and yield globally sorted, deduplicated silver rows.
+
+    Duplicate keys are adjacent during the merge. Because input order is part of
+    the merge key, the first duplicate popped is the first surviving record from
+    the bronze stream.
+    """
+    iterators = [iter_parquet_rows(path, batch_size=batch_size) for path in run_paths]
+    heap: list[tuple[tuple, int, dict]] = []
+
+    for run_index, iterator in enumerate(iterators):
+        try:
+            row = next(iterator)
+        except StopIteration:
+            continue
+        heapq.heappush(heap, (row_merge_key(row), run_index, row))
+
+    previous_key = None
+    while heap:
+        _, run_index, row = heapq.heappop(heap)
+        current_key = row_dedup_key(row)
+
+        if current_key == previous_key:
+            stats.duplicate_rows += 1
+        else:
+            previous_key = current_key
+            yield {field: row[field] for field in get_silver_output_fields()}
+
+        try:
+            next_row = next(iterators[run_index])
+        except StopIteration:
+            continue
+        heapq.heappush(heap, (row_merge_key(next_row), run_index, next_row))
+
+
+def prepare_silver_output_target(output_path: str) -> Path:
+    """
+    Resolve final parquet target for file or dataset-directory output.
+
+    A path ending in .parquet is treated as a single parquet file. Any other
+    path is treated as a dataset directory containing part-000.parquet.
+    """
+    output_path = Path(output_path)
+
+    if output_path.suffix == ".parquet":
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        return output_path
+
+    if output_path.exists() and any(output_path.iterdir()):
+        raise FileExistsError(f"Silver dataset directory is not empty: {output_path}")
+
+    output_path.mkdir(parents=True, exist_ok=True)
+    return output_path / "part-000.parquet"
+
+
+def write_silver_rows(
+    rows: Iterator[dict],
+    output_path: str,
+    stats: SilverPipelineStats,
+    batch_size: int = DEFAULT_SILVER_BATCH_SIZE,
+) -> None:
+    """Stream final silver rows to parquet without materializing all rows."""
+    target_path = prepare_silver_output_target(output_path)
+    output_fields = get_silver_output_fields()
+    writer = None
+    buffer: list[dict] = []
+
+    def flush_buffer() -> None:
+        nonlocal writer, buffer
+        if not buffer:
+            return
+
+        df = pd.DataFrame.from_records(buffer, columns=output_fields)
+        df = enforce_silver_dtypes(df)
+        table = pa.Table.from_pandas(
+            df[output_fields],
+            schema=schemas.SILVER_SCHEMA,
+            preserve_index=False,
+        )
+        if writer is None:
+            writer = pq.ParquetWriter(
+                target_path,
+                schemas.SILVER_SCHEMA,
+                compression="snappy",
+            )
+        writer.write_table(table)
+        buffer = []
+
+    try:
+        for row in rows:
+            buffer.append(row)
+            stats.output_rows += 1
+            if len(buffer) >= batch_size:
+                flush_buffer()
+
+        flush_buffer()
+    finally:
+        if writer is not None:
+            writer.close()
+
+    if stats.output_rows == 0:
+        table = pa.Table.from_batches([], schema=schemas.SILVER_SCHEMA)
+        pq.write_table(table, target_path, compression="snappy")
+
+    logger.info(f"✓ Wrote silver artifact: {target_path}")
+
+
 def finalize_silver_parts(
     parts_dir: str,
     output_path: str,
     stats: SilverPipelineStats,
-) -> pd.DataFrame:
+) -> None:
     """
     Apply global silver operations to cleaned parts and write final output.
 
-    Deduplication and sorting are global because correctness depends on seeing
-    every event key and all tie-breaker columns across batch boundaries.
+    This is an external sort + k-way merge. It preserves global ordering and
+    deduplication semantics without loading all cleaned rows into pandas.
     """
     parts_path = Path(parts_dir)
-    if any(parts_path.glob("*.parquet")):
-        df = read_bronze_parquet(str(parts_path))
-        df = enforce_silver_dtypes(df)
-    else:
-        df = empty_silver_dataframe()
+    if not any(parts_path.glob("*.parquet")):
+        write_silver_rows(iter([]), output_path, stats)
+        return
 
-    df, duplicates = deduplicate_events(df)
-    stats.duplicate_rows += duplicates
-    df = sort_deterministic(df)
-    write_silver_parquet(df, output_path)
-
-    stats.output_rows = len(df)
-    return df
+    with TemporaryDirectory(prefix="silver-runs-") as runs_dir:
+        run_paths = write_sorted_silver_runs(str(parts_path), runs_dir)
+        rows = iter_merged_unique_rows(run_paths, stats)
+        write_silver_rows(rows, output_path, stats)
 
 
 def run_silver_pipeline(
@@ -411,32 +617,17 @@ def write_silver_parquet(df: pd.DataFrame, output_path: str) -> None:
         output_path: Path to output parquet file, or dataset directory when the
             path does not end in .parquet
     """
-    output_path = Path(output_path)
-
-    if (
-        output_path.suffix != ".parquet"
-        and output_path.exists()
-        and any(output_path.iterdir())
-    ):
-        raise FileExistsError(f"Silver dataset directory is not empty: {output_path}")
+    target_path = prepare_silver_output_target(output_path)
 
     # Reorder columns to match schema order
-    silver_fields = [field.name for field in schemas.SILVER_SCHEMA]
+    silver_fields = get_silver_output_fields()
     df = df[silver_fields]
 
     # Convert to PyArrow table with schema
     table = pa.Table.from_pandas(df, schema=schemas.SILVER_SCHEMA)
 
-    if output_path.suffix == ".parquet":
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        pq.write_table(table, output_path, compression="snappy")
-        logger.info(f"✓ Wrote silver artifact: {output_path}")
-        return
-
-    output_path.mkdir(parents=True, exist_ok=True)
-    dataset_file = output_path / "part-000.parquet"
-    pq.write_table(table, dataset_file, compression="snappy")
-    logger.info(f"✓ Wrote silver dataset artifact: {dataset_file}")
+    pq.write_table(table, target_path, compression="snappy")
+    logger.info(f"✓ Wrote silver artifact: {target_path}")
 
 
 def main():
