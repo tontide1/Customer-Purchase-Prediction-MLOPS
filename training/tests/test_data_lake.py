@@ -9,6 +9,7 @@ Tests core transformations:
 - Invalid records rejected
 """
 
+import importlib
 import pytest
 import pandas as pd
 import pyarrow as pa
@@ -21,13 +22,18 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from shared import constants, schemas
 from training.src.bronze import (
+    discover_raw_files,
+    ensure_not_simulation_raw_input,
     validate_event_type,
     transform_to_bronze,
     parse_event_time,
 )
+import training.src.config as config_module
+from training.src.config import Config
 from training.src.silver import (
     check_required_fields,
     check_price_validity,
+    deduplicate_events,
     sort_deterministic,
 )
 
@@ -73,6 +79,7 @@ def sample_bronze_df():
             ),
             "event_type": ["view", "cart", "purchase"],
             "product_id": ["1", "2", "3"],
+            constants.FIELD_CATEGORY_ID: ["cat1", "cat2", "cat3"],
             "category_code": ["code1", "code2", "code3"],
             "brand": ["brand1", "brand2", "brand3"],
             "price": [10.0, 20.0, 30.0],
@@ -112,6 +119,14 @@ class TestBronzeLayer:
 
         # Check that old event_time field is gone
         assert constants.FIELD_EVENT_TIME not in df_bronze.columns
+
+    def test_category_id_preserved_in_bronze(self, sample_raw_df):
+        """Test that category_id survives raw → bronze."""
+        df = parse_event_time(sample_raw_df.copy())
+        df_bronze = transform_to_bronze(df)
+
+        assert constants.FIELD_CATEGORY_ID in df_bronze.columns
+        assert df_bronze[constants.FIELD_CATEGORY_ID].tolist() == ["cat1", "cat2", "cat3"]
 
     def test_valid_event_type_kept(self, sample_raw_df):
         """Test that records with valid event_type are kept."""
@@ -166,17 +181,43 @@ class TestSilverLayer:
         assert num_rejected == 1
 
     def test_price_validity_check(self, sample_bronze_df):
-        """Test that records with invalid prices are rejected."""
+        """Test that records with non-positive prices are rejected."""
         df_modified = sample_bronze_df.copy()
         # Set some prices to invalid values
         df_modified.loc[0, "price"] = 0.0  # Invalid: <= 0
         df_modified.loc[1, "price"] = -5.0  # Invalid: <= 0
-        df_modified.loc[2, "price"] = None  # Invalid: missing
+        df_modified.loc[2, "price"] = 1.0
 
         df_valid, num_rejected = check_price_validity(df_modified)
 
-        assert len(df_valid) == 0
-        assert num_rejected == 3
+        assert len(df_valid) == 1
+        assert num_rejected == 2
+
+    def test_null_price_is_allowed(self):
+        """Test that null price is preserved in silver."""
+        df = pd.DataFrame(
+            {
+                constants.FIELD_SOURCE_EVENT_TIME: pd.to_datetime(
+                    [
+                        "2019-10-01 10:00:00",
+                        "2019-10-01 10:01:00",
+                    ]
+                ),
+                "event_type": ["view", "cart"],
+                "product_id": ["1", "2"],
+                constants.FIELD_CATEGORY_ID: ["cat1", "cat2"],
+                "category_code": ["code1", "code2"],
+                "brand": ["brand1", "brand2"],
+                "price": [None, 10.0],
+                "user_id": ["u1", "u2"],
+                "user_session": ["s1", "s1"],
+            }
+        )
+
+        df_valid, num_rejected = check_price_validity(df)
+
+        assert len(df_valid) == 2
+        assert num_rejected == 0
 
     def test_deterministic_sort(self, sample_bronze_df):
         """Test that records are sorted deterministically."""
@@ -192,6 +233,7 @@ class TestSilverLayer:
                 ),
                 "event_type": ["view", "cart", "purchase"],
                 "product_id": ["1", "2", "3"],
+                constants.FIELD_CATEGORY_ID: ["cat1", "cat2", "cat3"],
                 "category_code": ["code1", "code2", "code3"],
                 "brand": ["brand1", "brand2", "brand3"],
                 "price": [10.0, 20.0, 30.0],
@@ -225,6 +267,7 @@ class TestSilverLayer:
                 ),
                 "event_type": ["view", "cart"],
                 "product_id": ["1", "2"],
+                constants.FIELD_CATEGORY_ID: ["cat1", "cat2"],
                 "category_code": ["code1", "code2"],
                 "brand": ["brand1", "brand2"],
                 "price": [10.0, 20.0],
@@ -238,6 +281,34 @@ class TestSilverLayer:
         df1_sorted2 = sort_deterministic(df1.copy())
 
         pd.testing.assert_frame_equal(df1_sorted1, df1_sorted2)
+
+    def test_canonical_dedup_removes_duplicate_events(self):
+        """Test that canonical duplicate events are removed."""
+        df = pd.DataFrame(
+            {
+                constants.FIELD_SOURCE_EVENT_TIME: pd.to_datetime(
+                    [
+                        "2019-10-01 10:00:00",
+                        "2019-10-01 10:00:00",
+                        "2019-10-01 10:01:00",
+                    ]
+                ),
+                "event_type": ["view", "view", "cart"],
+                "product_id": ["1", "1", "2"],
+                constants.FIELD_CATEGORY_ID: ["cat1", "cat1", "cat2"],
+                "category_code": ["code1", "code1", "code2"],
+                "brand": ["brand1", "brand1", "brand2"],
+                "price": [10.0, 10.0, 20.0],
+                "user_id": ["u1", "u1", "u2"],
+                "user_session": ["s1", "s1", "s1"],
+            }
+        )
+
+        df_deduped, num_duplicates = deduplicate_events(df)
+
+        assert len(df_deduped) == 2
+        assert num_duplicates == 1
+        assert df_deduped["event_type"].tolist() == ["view", "cart"]
 
 
 # ============================================================================
@@ -310,6 +381,7 @@ class TestPipelineIntegration:
                 ],
                 "event_type": ["view", "invalid", "cart", "purchase"],
                 "product_id": ["1", "2", "3", "4"],
+                constants.FIELD_CATEGORY_ID: ["cat1", "cat2", "cat3", "cat4"],
                 "category_code": ["code1", "code2", "code3", "code4"],
                 "brand": ["b1", "b2", "b3", "b4"],
                 "price": [10.0, 20.0, 0.0, 30.0],  # price[2] is invalid
@@ -340,6 +412,62 @@ class TestPipelineIntegration:
         # One record has price = 0
         assert invalid_prices == 1
         assert len(df_silver) == 1
+
+
+class TestDataPathConfig:
+    """Tests for train/simulation/retrain data path contracts."""
+
+    def test_data_strategy_config_defaults(self, monkeypatch):
+        monkeypatch.delenv("TRAIN_RAW_DATA_PATH", raising=False)
+        monkeypatch.delenv("SIMULATION_RAW_DATA_PATH", raising=False)
+        monkeypatch.delenv("RETRAIN_RAW_DATA_DIR", raising=False)
+        monkeypatch.delenv("RETRAIN_DATA_DIR", raising=False)
+        monkeypatch.delenv("RETRAIN_WINDOW_DAYS", raising=False)
+
+        fresh_config_module = importlib.reload(config_module)
+
+        assert fresh_config_module.Config.TRAIN_RAW_DATA_PATH == "data/train_raw"
+        assert (
+            fresh_config_module.Config.SIMULATION_RAW_DATA_PATH
+            == "data/simulation_raw/2019-Nov.csv.gz"
+        )
+        assert fresh_config_module.Config.RETRAIN_RAW_DATA_DIR == "data/retrain_raw"
+        assert fresh_config_module.Config.RETRAIN_DATA_DIR == "data/retrain"
+        assert fresh_config_module.Config.RETRAIN_WINDOW_DAYS == 14
+
+        settings = fresh_config_module.Config.get_all_settings()
+        assert "raw_data_path" not in settings
+        assert settings["train_raw_data_path"] == "data/train_raw"
+        assert (
+            settings["simulation_raw_data_path"]
+            == "data/simulation_raw/2019-Nov.csv.gz"
+        )
+
+    @pytest.mark.parametrize(
+        "input_path",
+        [
+            "data/simulation_raw",
+            Config.SIMULATION_RAW_DATA_PATH,
+        ],
+    )
+    def test_bronze_rejects_simulation_raw_input(self, input_path):
+        with pytest.raises(ValueError, match="simulation raw data"):
+            ensure_not_simulation_raw_input(input_path)
+
+    def test_bronze_discovery_only_reads_train_raw_directory(self, tmp_path):
+        train_raw = tmp_path / "train_raw"
+        simulation_raw = tmp_path / "simulation_raw"
+        train_raw.mkdir()
+        simulation_raw.mkdir()
+
+        oct_file = train_raw / "2019-Oct.csv.gz"
+        nov_file = simulation_raw / "2019-Nov.csv.gz"
+        oct_file.write_text("event_time,event_type\n")
+        nov_file.write_text("event_time,event_type\n")
+
+        discovered = discover_raw_files(str(train_raw))
+
+        assert discovered == [oct_file]
 
 
 if __name__ == "__main__":

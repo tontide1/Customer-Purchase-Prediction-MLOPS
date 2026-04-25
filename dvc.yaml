@@ -5,19 +5,19 @@
 stages:
   bronze:
     desc: "Transform raw CSV to bronze parquet (event_time → source_event_time)"
-    cmd: python training/src/bronze.py --input data/raw --output data/bronze/events.parquet --window-profile dev_smoke
+    cmd: python training/src/bronze.py --input data/train_raw --output data/bronze/events.parquet
     deps:
       - training/src/bronze.py
       - training/src/config.py
       - shared/constants.py
       - shared/schemas.py
-      - data/raw
+      - data/train_raw
     outs:
       - data/bronze/events.parquet:
           desc: "Validated, immutable bronze artifact with source_event_time"
 
   silver:
-    desc: "Clean and sort bronze data to silver parquet"
+    desc: "Clean, deduplicate, and sort bronze data to silver parquet"
     cmd: python training/src/silver.py --input data/bronze/events.parquet --output data/silver/events.parquet
     deps:
       - training/src/silver.py

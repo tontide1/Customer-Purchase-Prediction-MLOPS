@@ -11,7 +11,9 @@ Week 1 establishes the minimum viable data pipeline for the MLOps project. The f
 ### 1. Directory Scaffold ✓
 ```
 data/
-├── raw/              # Immutable source layer
+├── train_raw/        # Baseline training source (2019-Oct)
+├── simulation_raw/   # Online Simulation source (2019-Nov)
+├── retrain_raw/      # Future DB exports for retraining
 ├── bronze/           # Validated, standardized
 ├── silver/           # Cleaned, deduplicated
 └── gold/             # Reserved for Week 2
@@ -61,7 +63,7 @@ shared/              # Reusable modules
 
 #### Bronze Pipeline (`training/src/bronze.py`)
 **Transformation**: Raw CSV → Bronze Parquet
-- Reads all CSV files from `data/raw/`
+- Reads baseline training CSV files from `data/train_raw/`
 - Parses `event_time` string to UTC timestamp
 - Renames `event_time` → `source_event_time`
 - Validates `event_type` against allowed values
@@ -77,7 +79,8 @@ shared/              # Reusable modules
 **Transformation**: Bronze Parquet → Silver Parquet
 - Reads `data/bronze/events.parquet`
 - Validates required fields (no nulls)
-- Validates price > 0
+- Allows `price = null`, rejects only non-positive non-null prices
+- Deduplicates canonical events by `user_session + source_event_time + event_type + product_id + user_id`
 - Sorts deterministically by user_session + source_event_time
 - Logs rejections for data quality tracking
 - Writes Parquet with Snappy compression
@@ -104,7 +107,9 @@ shared/              # Reusable modules
 |-------|------|--------|
 | Bronze | event_type ∉ {view, cart, remove_from_cart, purchase} | REJECT |
 | Silver | Any required field is NULL | REJECT |
+| Silver | price is null | KEEP |
 | Silver | price ≤ 0 | REJECT |
+| Silver | Canonical duplicate event | DEDUP |
 | Silver | Unsorted by (user_session, source_event_time) | SORT |
 
 ### 6. DVC Configuration ✓
@@ -113,7 +118,7 @@ shared/              # Reusable modules
 ```yaml
 stages:
   bronze:
-    deps: [training/src/bronze.py, shared/*, data/raw]
+    deps: [training/src/bronze.py, shared/*, data/train_raw]
     outs: [data/bronze/events.parquet]
   
   silver:
@@ -154,9 +159,9 @@ stages:
 
 #### `docs/RAW_DATA_INTAKE.md`
 - Raw layer contract (immutability, field names)
-- Data source description (dataset/*.csv.gz)
-- Intake process (unpacking to data/raw/)
-- No hard-coding of specific files
+- Data source description split by role: Oct baseline, Nov Online Simulation, DB export retraining
+- Intake process for `data/train_raw/`, `data/simulation_raw/`, and future `data/retrain_raw/`
+- No direct training from Online Simulation raw files
 - Future extensibility noted
 
 #### `docs/WEEK1_SETUP.md`
@@ -202,14 +207,14 @@ stages:
 - [x] silver.py script runs without errors
 - [x] dvc.yaml only contains Week 1 stages
 - [x] .env.example complete
-- [x] Sample raw data in data/raw/
+- [x] Baseline raw data in data/train_raw/
 - [x] Tests written and (ready to pass)
 - [x] Documentation complete
 
 ### Contract ✓
 - [x] Raw layer uses event_time field name
 - [x] Bronze/Silver use source_event_time
-- [x] No hard-coded file names (2019-Oct.csv)
+- [x] Baseline training is intentionally scoped to `2019-Oct.csv.gz`
 - [x] Timestamp contract consistent across code and docs
 - [x] Prediction horizon locked at 10 minutes
 - [x] Config centralized in training/src/config.py
@@ -275,7 +280,8 @@ dvc status             # Check artifact status
 - training/tests/test_data_lake.py
 - docs/RAW_DATA_INTAKE.md
 - docs/WEEK1_SETUP.md
-- data/raw/2019-Oct-sample.csv.gz
+- data/train_raw/2019-Oct.csv.gz
+- data/simulation_raw/2019-Nov.csv.gz
 - data/bronze/.gitkeep (via script)
 - data/silver/.gitkeep (via script)
 - data/gold/.gitkeep (via script)
@@ -298,6 +304,9 @@ dvc status             # Check artifact status
 ### 1. Configuration Centralization
 **Decision**: All paths and settings in `training/src/config.py`
 **Rationale**: Eliminates scattered configuration, enables easy env var override
+
+**Decision**: `2019-Oct.csv.gz` is baseline training data; `2019-Nov.csv.gz` is Online Simulation data; retraining uses database exports from replayed Nov events.
+**Rationale**: Prevents leakage between offline training and online replay while preserving a DB-backed retraining path.
 
 ### 2. Timestamp Field Rename (event_time → source_event_time)
 **Decision**: Rename happens in bronze layer

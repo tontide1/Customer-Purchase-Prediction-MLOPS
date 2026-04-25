@@ -7,7 +7,6 @@ All paths and credentials are loaded from environment variables with sensible de
 
 import os
 from pathlib import Path
-from typing import Optional
 
 
 class Config:
@@ -16,21 +15,16 @@ class Config:
     # ========================================================================
     # Paths (relative to repo root)
     # ========================================================================
-    RAW_DATA_PATH = os.getenv("RAW_DATA_PATH", "data/raw")
+    TRAIN_RAW_DATA_PATH = os.getenv("TRAIN_RAW_DATA_PATH", "data/train_raw")
+    SIMULATION_RAW_DATA_PATH = os.getenv(
+        "SIMULATION_RAW_DATA_PATH", "data/simulation_raw/2019-Nov.csv.gz"
+    )
+    RETRAIN_RAW_DATA_DIR = os.getenv("RETRAIN_RAW_DATA_DIR", "data/retrain_raw")
+    RETRAIN_DATA_DIR = os.getenv("RETRAIN_DATA_DIR", "data/retrain")
     BRONZE_DATA_PATH = os.getenv("BRONZE_DATA_PATH", "data/bronze/events.parquet")
     SILVER_DATA_PATH = os.getenv("SILVER_DATA_PATH", "data/silver/events.parquet")
     GOLD_DATA_DIR = os.getenv("GOLD_DATA_DIR", "data/gold")
-
-    # ========================================================================
-    # Raw Window Selection
-    # ========================================================================
-    DATA_WINDOW_PROFILE = os.getenv("DATA_WINDOW_PROFILE", "dev_smoke")
-    TRAINING_WINDOW_START = os.getenv("TRAINING_WINDOW_START", "2019-10")
-    TRAINING_WINDOW_END = os.getenv("TRAINING_WINDOW_END", "2020-02")
-    DEV_SMOKE_WINDOW_START = os.getenv("DEV_SMOKE_WINDOW_START", "2019-10")
-    DEV_SMOKE_WINDOW_END = os.getenv("DEV_SMOKE_WINDOW_END", "2019-10")
-    REPLAY_WINDOW_START = os.getenv("REPLAY_WINDOW_START", "2020-03")
-    REPLAY_WINDOW_END = os.getenv("REPLAY_WINDOW_END", "2020-04")
+    RETRAIN_WINDOW_DAYS = int(os.getenv("RETRAIN_WINDOW_DAYS", "14"))
 
     # ========================================================================
     # Prediction Contract
@@ -66,9 +60,12 @@ class Config:
         Returns:
             True if configuration is valid, False otherwise.
         """
-        # Check that raw data path exists
-        if not Path(cls.RAW_DATA_PATH).exists():
-            print(f"Warning: RAW_DATA_PATH does not exist: {cls.RAW_DATA_PATH}")
+        # Check that baseline training raw path exists
+        if not Path(cls.TRAIN_RAW_DATA_PATH).exists():
+            print(
+                "Warning: TRAIN_RAW_DATA_PATH does not exist: "
+                f"{cls.TRAIN_RAW_DATA_PATH}"
+            )
             return False
 
         # Ensure output directories can be created
@@ -77,33 +74,17 @@ class Config:
         return True
 
     @classmethod
-    def get_window_bounds(
-        cls, profile: str | None = None
-    ) -> tuple[str | None, str | None]:
-        """Return inclusive raw window bounds for a profile."""
-        selected_profile = (profile or cls.DATA_WINDOW_PROFILE).strip().lower()
-
-        if selected_profile == "training":
-            return cls.TRAINING_WINDOW_START, cls.TRAINING_WINDOW_END
-        if selected_profile == "replay":
-            return cls.REPLAY_WINDOW_START, cls.REPLAY_WINDOW_END
-        if selected_profile == "dev_smoke":
-            return cls.DEV_SMOKE_WINDOW_START, cls.DEV_SMOKE_WINDOW_END
-        if selected_profile == "all":
-            return None, None
-
-        raise ValueError(
-            f"Unknown DATA_WINDOW_PROFILE '{selected_profile}'. Expected training, replay, dev_smoke, or all."
-        )
-
-    @classmethod
     def get_all_settings(cls) -> dict:
         """Return all current settings as a dictionary (for debugging/logging)."""
         return {
-            "raw_data_path": cls.RAW_DATA_PATH,
+            "train_raw_data_path": cls.TRAIN_RAW_DATA_PATH,
+            "simulation_raw_data_path": cls.SIMULATION_RAW_DATA_PATH,
+            "retrain_raw_data_dir": cls.RETRAIN_RAW_DATA_DIR,
+            "retrain_data_dir": cls.RETRAIN_DATA_DIR,
             "bronze_data_path": cls.BRONZE_DATA_PATH,
             "silver_data_path": cls.SILVER_DATA_PATH,
             "gold_data_dir": cls.GOLD_DATA_DIR,
+            "retrain_window_days": cls.RETRAIN_WINDOW_DAYS,
             "data_window_profile": cls.DATA_WINDOW_PROFILE,
             "training_window_start": cls.TRAINING_WINDOW_START,
             "training_window_end": cls.TRAINING_WINDOW_END,

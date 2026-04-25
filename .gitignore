@@ -1,6 +1,9 @@
 # my ignore
 dataset/
 .opencode/
+data/**/*.csv.gz
+dataset/**/*.csv.gz
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -65,7 +68,6 @@ env/
 # MLOps artifacts
 mlruns/
 .mlflow/
-# dvc.lock
 .dvc/cache
 outputs/
 models/

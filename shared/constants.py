@@ -27,6 +27,7 @@ ARTIFACT_TEST_SNAPSHOTS = "test_snapshots.parquet"
 # ============================================================================
 # Raw layer: original field from source
 FIELD_EVENT_TIME = "event_time"
+FIELD_CATEGORY_ID = "category_id"
 
 # Bronze/Silver/Gold layers: standardized internal field
 FIELD_SOURCE_EVENT_TIME = "source_event_time"
@@ -50,6 +51,7 @@ ALLOWED_EVENT_TYPES = {
 # ============================================================================
 REQUIRED_FIELDS = {
     FIELD_EVENT_TIME,  # Or FIELD_SOURCE_EVENT_TIME in downstream layers
+    FIELD_CATEGORY_ID,
     "event_type",
     "product_id",
     "user_id",
@@ -69,3 +71,14 @@ NULLABLE_FIELDS = {
 # Default Values
 # ============================================================================
 DEFAULT_PRICE_THRESHOLD = 0.0  # price <= 0 is invalid
+
+# ============================================================================
+# Canonical Deduplication Contract
+# ============================================================================
+DEDUP_KEY_FIELDS = (
+    "user_session",
+    FIELD_SOURCE_EVENT_TIME,
+    "event_type",
+    "product_id",
+    "user_id",
+)

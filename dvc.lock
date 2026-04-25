@@ -1,0 +1,69 @@
+schema: '2.0'
+stages:
+  bronze:
+    cmd: python training/src/bronze.py --input data/train_raw --output 
+      data/bronze/events.parquet
+    deps:
+    - path: data/train_raw
+      hash: md5
+      md5: c9860271c90687352f3e18152087c8d6.dir
+      size: 1741928540
+      nfiles: 1
+    - path: shared/constants.py
+      hash: md5
+      md5: 87cbff908753749bbff2f5825177236d
+      size: 2926
+      isexec: true
+    - path: shared/schemas.py
+      hash: md5
+      md5: dc0bf2ac52d73f125606892369f75a30
+      size: 2986
+      isexec: true
+    - path: training/src/bronze.py
+      hash: md5
+      md5: 3d7414c395cc7e7da9eea49ac43fdee4
+      size: 15756
+      isexec: true
+    - path: training/src/config.py
+      hash: md5
+      md5: 6a19ebe2d8e0ba932439121fb790500b
+      size: 4257
+      isexec: true
+    outs:
+    - path: data/bronze/events.parquet
+      hash: md5
+      md5: 4755b5563f0380cce8d677f2d515a073
+      size: 1187246639
+  silver:
+    cmd: python training/src/silver.py --input data/bronze/events.parquet 
+      --output data/silver/events.parquet
+    deps:
+    - path: data/bronze/events.parquet
+      hash: md5
+      md5: 4755b5563f0380cce8d677f2d515a073
+      size: 1187246639
+    - path: shared/constants.py
+      hash: md5
+      md5: 87cbff908753749bbff2f5825177236d
+      size: 2926
+      isexec: true
+    - path: shared/schemas.py
+      hash: md5
+      md5: dc0bf2ac52d73f125606892369f75a30
+      size: 2986
+      isexec: true
+    - path: training/src/config.py
+      hash: md5
+      md5: 6a19ebe2d8e0ba932439121fb790500b
+      size: 4257
+      isexec: true
+    - path: training/src/silver.py
+      hash: md5
+      md5: 5b14497f37de3903d299c98e0b78e114
+      size: 8271
+      isexec: true
+    outs:
+    - path: data/silver/events.parquet
+      hash: md5
+      md5: f83f81a9acb53bc4b2728c055007179b
+      size: 1081217339

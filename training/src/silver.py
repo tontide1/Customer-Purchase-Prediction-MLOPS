@@ -3,9 +3,10 @@ Silver layer pipeline: Bronze Parquet → Silver Parquet.
 
 Cleans and prepares bronze data for modeling:
 - Removes records with missing required fields
-- Removes records with price <= 0
-- Sorts deterministically by session/time plus stable tie-breakers
-- Writes either a single parquet file or a parquet dataset directory
+- Keeps null prices but removes records with price <= 0
+- Removes canonical duplicate events
+- Sorts deterministically by user_session + source_event_time
+- Outputs clean, ready-for-modeling artifact
 """
 
 import argparse
@@ -35,45 +36,12 @@ logger = logging.getLogger(__name__)
 SILVER_STRING_COLUMNS = [
     "event_type",
     "product_id",
+    constants.FIELD_CATEGORY_ID,
     "user_id",
     "user_session",
     "category_code",
     "brand",
 ]
-
-SILVER_SORT_TIE_BREAKERS = ["event_type", "product_id", "user_id"]
-
-
-def is_parquet_target(path: Path) -> bool:
-    """Return True when the path is intended to be a parquet file."""
-    return path.suffix == ".parquet"
-
-
-def is_nonempty_directory(path: Path) -> bool:
-    """Return True when a directory already contains files."""
-    return path.exists() and path.is_dir() and any(path.iterdir())
-
-
-def get_silver_sort_columns(df: pd.DataFrame) -> list[str]:
-    """Build the deterministic sort key list used by silver."""
-    return [
-        "user_session",
-        constants.FIELD_SOURCE_EVENT_TIME,
-        *SILVER_SORT_TIE_BREAKERS,
-    ]
-
-
-def validate_silver_sort_columns(df: pd.DataFrame) -> None:
-    """Fail fast when deterministic sort columns are missing."""
-    required_sort_columns = get_silver_sort_columns(df)
-    missing_columns = [
-        column for column in required_sort_columns if column not in df.columns
-    ]
-    if missing_columns:
-        raise ValueError(
-            "Silver sort requires columns: "
-            f"{', '.join(required_sort_columns)}; missing: {', '.join(missing_columns)}"
-        )
 
 
 def read_bronze_parquet(bronze_path: str) -> pd.DataFrame:
@@ -81,7 +49,7 @@ def read_bronze_parquet(bronze_path: str) -> pd.DataFrame:
     Read bronze parquet artifact.
 
     Args:
-        bronze_path: Path to a bronze parquet file or parquet dataset directory
+        bronze_path: Path to bronze parquet file
 
     Returns:
         DataFrame with bronze data
@@ -91,11 +59,7 @@ def read_bronze_parquet(bronze_path: str) -> pd.DataFrame:
     if not bronze_path.exists():
         raise FileNotFoundError(f"Bronze parquet not found: {bronze_path}")
 
-    if bronze_path.is_dir():
-        logger.info(f"Reading bronze dataset directory: {bronze_path}")
-    else:
-        logger.info(f"Reading bronze artifact: {bronze_path}")
-
+    logger.info(f"Reading bronze artifact: {bronze_path}")
     table = pq.read_table(bronze_path)
     df = table.to_pandas()
     logger.info(f"  ✓ Read {len(df)} rows")
@@ -128,26 +92,6 @@ def enforce_silver_dtypes(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def normalize_category_code(
-    df: pd.DataFrame,
-    policy: str = "keep",
-    fill_value: str = "unknown",
-) -> pd.DataFrame:
-    """Normalize category_code according to the selected policy."""
-    if "category_code" not in df.columns:
-        return df
-
-    normalized_policy = policy.strip().lower()
-    if normalized_policy == "keep":
-        return df
-
-    if normalized_policy == "fill":
-        df["category_code"] = df["category_code"].fillna(fill_value).astype("string")
-        return df
-
-    raise ValueError("category_code_policy must be 'keep' or 'fill'")
-
-
 def check_required_fields(df: pd.DataFrame) -> tuple:
     """
     Check and remove records with missing required fields.
@@ -178,7 +122,7 @@ def check_required_fields(df: pd.DataFrame) -> tuple:
 
 def check_price_validity(df: pd.DataFrame) -> tuple:
     """
-    Remove records with invalid prices (price <= 0 or NaN).
+    Remove records with invalid non-null prices (price <= 0).
 
     Args:
         df: Input DataFrame
@@ -188,8 +132,8 @@ def check_price_validity(df: pd.DataFrame) -> tuple:
     """
     logger.info("Checking price validity...")
 
-    # Records with missing or invalid price are rejected
-    mask = (df["price"].notna()) & (df["price"] > constants.DEFAULT_PRICE_THRESHOLD)
+    # Null price is allowed; only non-null non-positive prices are rejected.
+    mask = df["price"].isna() | (df["price"] > constants.DEFAULT_PRICE_THRESHOLD)
     num_rejected = (~mask).sum()
 
     if num_rejected > 0:
@@ -198,9 +142,30 @@ def check_price_validity(df: pd.DataFrame) -> tuple:
     return df[mask].copy(), num_rejected
 
 
+def deduplicate_events(df: pd.DataFrame) -> tuple:
+    """
+    Remove duplicate events using the canonical event key.
+
+    The canonical key matches the planned event_id contract:
+    user_session | source_event_time | event_type | product_id | user_id
+    """
+    logger.info("Deduplicating events by canonical key...")
+    before_count = len(df)
+    deduplicated = df.drop_duplicates(
+        subset=list(constants.DEDUP_KEY_FIELDS),
+        keep="first",
+    ).copy()
+    num_duplicates = before_count - len(deduplicated)
+
+    if num_duplicates > 0:
+        logger.warning(f"  Removed {num_duplicates} duplicate record(s)")
+
+    return deduplicated, num_duplicates
+
+
 def sort_deterministic(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Sort records deterministically by session/time plus stable tie-breakers.
+    Sort records deterministically by user_session + source_event_time.
 
     Args:
         df: Input DataFrame
@@ -208,13 +173,10 @@ def sort_deterministic(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         Sorted DataFrame
     """
-    validate_silver_sort_columns(df)
-    sort_columns = get_silver_sort_columns(df)
-    logger.info("Sorting deterministically by %s...", "+".join(sort_columns))
+    logger.info("Sorting deterministically by user_session + source_event_time...")
     df = df.sort_values(
-        by=sort_columns,
+        by=["user_session", constants.FIELD_SOURCE_EVENT_TIME],
         ascending=True,
-        kind="mergesort",
     ).reset_index(drop=True)
     logger.info(f"  ✓ Sorted {len(df)} records")
 
@@ -223,26 +185,14 @@ def sort_deterministic(df: pd.DataFrame) -> pd.DataFrame:
 
 def write_silver_parquet(df: pd.DataFrame, output_path: str) -> None:
     """
-    Write a silver parquet file or parquet dataset.
+    Write DataFrame to Silver Parquet file.
 
     Args:
         df: Input DataFrame
         output_path: Path to output parquet file
     """
     output_path = Path(output_path)
-
-    if is_parquet_target(output_path):
-        if output_path.exists() and output_path.is_dir():
-            raise FileExistsError(
-                f"Output path is a directory but file target was requested: {output_path}"
-            )
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-    else:
-        if is_nonempty_directory(output_path):
-            raise FileExistsError(
-                f"Output directory already exists and is not empty: {output_path}"
-            )
-        output_path.mkdir(parents=True, exist_ok=True)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Reorder columns to match schema order
     silver_fields = [field.name for field in schemas.SILVER_SCHEMA]
@@ -251,12 +201,9 @@ def write_silver_parquet(df: pd.DataFrame, output_path: str) -> None:
     # Convert to PyArrow table with schema
     table = pa.Table.from_pandas(df, schema=schemas.SILVER_SCHEMA)
 
-    if is_parquet_target(output_path):
-        pq.write_table(table, output_path, compression="snappy")
-        logger.info(f"✓ Wrote silver artifact: {output_path}")
-    else:
-        pq.write_to_dataset(table, root_path=output_path, compression="snappy")
-        logger.info(f"✓ Wrote silver dataset: {output_path}")
+    # Write parquet
+    pq.write_table(table, output_path, compression="snappy")
+    logger.info(f"✓ Wrote silver artifact: {output_path}")
 
 
 def main():
@@ -272,21 +219,7 @@ def main():
     parser.add_argument(
         "--output",
         default=Config.SILVER_DATA_PATH,
-        help=(
-            f"Path to silver output parquet file or dataset directory "
-            f"(default: {Config.SILVER_DATA_PATH})"
-        ),
-    )
-    parser.add_argument(
-        "--category-code-policy",
-        choices=["keep", "fill"],
-        default="keep",
-        help="Policy for null category_code values (default: keep)",
-    )
-    parser.add_argument(
-        "--category-code-fill-value",
-        default="unknown",
-        help="Value used when category_code-policy=fill (default: unknown)",
+        help=f"Path to silver output parquet file (default: {Config.SILVER_DATA_PATH})",
     )
 
     args = parser.parse_args()
@@ -294,7 +227,6 @@ def main():
     logger.info("=" * 70)
     logger.info("SILVER PIPELINE: Bronze Parquet → Silver Parquet")
     logger.info("=" * 70)
-    logger.info(f"Category code policy: {args.category_code_policy}")
 
     try:
         # Read bronze artifact
@@ -302,16 +234,10 @@ def main():
         df = read_bronze_parquet(args.input)
         initial_count = len(df)
         total_rejected = 0
+        total_duplicates = 0
 
         # Normalize dtypes before validation and write
         df = enforce_silver_dtypes(df)
-
-        # Normalize nullable category semantics explicitly
-        df = normalize_category_code(
-            df,
-            policy=args.category_code_policy,
-            fill_value=args.category_code_fill_value,
-        )
 
         # Check required fields
         logger.info("\n2. Checking required fields...")
@@ -325,12 +251,18 @@ def main():
         total_rejected += num_rejected
         logger.info(f"   Valid records after price check: {len(df)}")
 
+        # Deduplicate canonical events before final sort/write
+        logger.info("\n4. Deduplicating canonical events...")
+        df, num_duplicates = deduplicate_events(df)
+        total_duplicates += num_duplicates
+        logger.info(f"   Valid records after dedup: {len(df)}")
+
         # Sort deterministically
-        logger.info("\n4. Sorting deterministically...")
+        logger.info("\n5. Sorting deterministically...")
         df = sort_deterministic(df)
 
         # Write output
-        logger.info(f"\n5. Writing silver artifact...")
+        logger.info(f"\n6. Writing silver artifact...")
         write_silver_parquet(df, args.output)
 
         # Summary
@@ -339,9 +271,9 @@ def main():
         logger.info("=" * 70)
         logger.info(f"Input rows:     {initial_count}")
         logger.info(f"Rejected:       {total_rejected}")
+        logger.info(f"Duplicates:     {total_duplicates}")
         logger.info(f"Output rows:    {len(df)}")
         logger.info(f"Output file:    {args.output}")
-        logger.info(f"Category code policy: {args.category_code_policy}")
         logger.info("=" * 70)
 
     except Exception as e:
