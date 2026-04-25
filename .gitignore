@@ -1,9 +1,8 @@
 # my ignore
 dataset/
-.opencode/
 data/**/*.csv.gz
 dataset/**/*.csv.gz
-
+.codex
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
