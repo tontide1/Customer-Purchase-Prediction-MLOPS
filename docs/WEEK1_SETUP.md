@@ -51,18 +51,21 @@ dvc remote modify minio-local endpointurl http://localhost:9000
 
 ### Step 4: Prepare Raw Data
 
-Raw data layer expects CSV files in `data/raw/`.
+Baseline training expects CSV files in `data/train_raw/`.
 
-**Option A: Copy sample data** (already done for testing):
+**Baseline training data**:
 ```bash
-# Sample file already created: data/raw/2019-Oct-sample.csv.gz
-ls data/raw/
+# 2019-Oct is the only baseline training input for Week 1
+mkdir -p data/train_raw
+cp dataset/2019-Oct.csv.gz data/train_raw/
+ls data/train_raw/
 ```
 
-**Option B: Add more raw data** (for full dataset):
+**Online Simulation source**:
 ```bash
-# Copy CSV files from dataset/ to data/raw/
-cp dataset/*.csv.gz data/raw/
+# 2019-Nov is reserved for Online Simulation/Data Replay
+mkdir -p data/simulation_raw
+cp dataset/2019-Nov.csv.gz data/simulation_raw/
 ```
 
 ### Step 5: Run Bronze Pipeline
@@ -127,8 +130,11 @@ python3 -m pytest training/tests/test_data_lake.py -v
 
 ```
 data/
-├── raw/                    # Immutable source data
-│   └── 2019-Oct-sample.csv.gz
+├── train_raw/              # Baseline training source
+│   └── 2019-Oct.csv.gz
+├── simulation_raw/         # Online Simulation source
+│   └── 2019-Nov.csv.gz
+├── retrain_raw/            # Future DB exports for retraining
 ├── bronze/                 # Validated, standardized
 │   └── events.parquet
 ├── silver/                 # Cleaned, deduplicated
@@ -156,7 +162,10 @@ shared/
 
 All paths and credentials are centralized in `training/src/config.py`:
 
-- **RAW_DATA_PATH**: `data/raw` (configurable via env var)
+- **TRAIN_RAW_DATA_PATH**: `data/train_raw` (configurable via env var)
+- **SIMULATION_RAW_DATA_PATH**: `data/simulation_raw/2019-Nov.csv.gz`
+- **RETRAIN_RAW_DATA_DIR**: `data/retrain_raw`
+- **RETRAIN_DATA_DIR**: `data/retrain`
 - **BRONZE_DATA_PATH**: `data/bronze/events.parquet`
 - **SILVER_DATA_PATH**: `data/silver/events.parquet`
 - **GOLD_DATA_DIR**: `data/gold` (for Week 2+)

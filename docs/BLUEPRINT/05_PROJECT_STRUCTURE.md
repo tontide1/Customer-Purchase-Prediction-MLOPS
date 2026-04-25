@@ -130,14 +130,14 @@ REAL-TIME-ECOMMERCE-INTENT-SYSTEM/
 ├── dataset/                        # (CURRENT STATE) Original datasets
 │   ├── 2019-Oct.csv.gz
 │   ├── 2019-Nov.csv.gz
-│   ├── 2019-Dec.csv.gz
-│   ├── 2020-Jan.csv.gz
-│   ├── 2020-Feb.csv.gz
-│   ├── 2020-Mar.csv.gz
-│   └── 2020-Apr.csv.gz
+│   └── 2019-Dec.csv.gz
 │
 └── data/                           # (PLANNED) Data lake directory (gitignored)
-    ├── raw/                        # Immutable raw CSVs (symlink từ dataset/ hoặc copy)
+    ├── train_raw/                  # Baseline training CSVs (2019-Oct)
+    │   └── .gitkeep
+    ├── simulation_raw/             # Online Simulation CSVs (2019-Nov)
+    │   └── .gitkeep
+    ├── retrain_raw/                # DB exports for retraining windows
     │   └── .gitkeep
     ├── bronze/                     # Parsed schema, event_time -> source_event_time
     │   └── .gitkeep
@@ -158,7 +158,9 @@ REAL-TIME-ECOMMERCE-INTENT-SYSTEM/
 
 | Purpose | Current Path | Target Path | Ghi chú |
 |---------|--------------|------------|---------|
-| **Raw Data Input** | `dataset/*.csv.gz` | `data/raw/` | Blueprint sẽ decompress từ `dataset/` hoặc copy vào `data/raw/` |
+| **Baseline Training Input** | `dataset/2019-Oct.csv.gz` | `data/train_raw/` | Input của Week 1 `bronze` stage |
+| **Online Simulation Input** | `dataset/2019-Nov.csv.gz` | `data/simulation_raw/` | Source cho Data Replay; không train trực tiếp |
+| **Retraining Input** | PostgreSQL export từ replayed Nov events | `data/retrain_raw/<window_id>/` | Re-materialize qua bronze/silver/gold trước khi retrain |
 | **Analysis & EDA** | `notebook/eda.ipynb` | `notebook/` hoặc `notebook-planned/` | Tái sử dụng insights từ EDA hiện có |
 | **Feature Experiments** | (không có) | `notebook-planned/02_feature_experiment.ipynb` | Cần tạo để experiment trước khi commit features |
 | **Model Experiments** | (không có) | `notebook-planned/03_model_experiment.ipynb` | So sánh XGBoost vs LightGBM vs Random Forest |
@@ -224,7 +226,10 @@ from pydantic_settings import BaseSettings
 
 class TrainingSettings(BaseSettings):
     # Data Lake Paths
-    raw_data_path: str = "data/raw/<dataset-file>.csv"
+    train_raw_data_path: str = "data/train_raw"
+    simulation_raw_data_path: str = "data/simulation_raw/2019-Nov.csv.gz"
+    retrain_raw_data_dir: str = "data/retrain_raw"
+    retrain_data_dir: str = "data/retrain"
     bronze_data_path: str = "data/bronze/events.parquet"
     silver_data_path: str = "data/silver/events.parquet"
     gold_data_dir: str = "data/gold"

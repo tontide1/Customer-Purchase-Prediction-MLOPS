@@ -7,7 +7,6 @@ All paths and credentials are loaded from environment variables with sensible de
 
 import os
 from pathlib import Path
-from typing import Optional
 
 
 class Config:
@@ -16,10 +15,16 @@ class Config:
     # ========================================================================
     # Paths (relative to repo root)
     # ========================================================================
-    RAW_DATA_PATH = os.getenv("RAW_DATA_PATH", "data/raw")
+    TRAIN_RAW_DATA_PATH = os.getenv("TRAIN_RAW_DATA_PATH", "data/train_raw")
+    SIMULATION_RAW_DATA_PATH = os.getenv(
+        "SIMULATION_RAW_DATA_PATH", "data/simulation_raw/2019-Nov.csv.gz"
+    )
+    RETRAIN_RAW_DATA_DIR = os.getenv("RETRAIN_RAW_DATA_DIR", "data/retrain_raw")
+    RETRAIN_DATA_DIR = os.getenv("RETRAIN_DATA_DIR", "data/retrain")
     BRONZE_DATA_PATH = os.getenv("BRONZE_DATA_PATH", "data/bronze/events.parquet")
     SILVER_DATA_PATH = os.getenv("SILVER_DATA_PATH", "data/silver/events.parquet")
     GOLD_DATA_DIR = os.getenv("GOLD_DATA_DIR", "data/gold")
+    RETRAIN_WINDOW_DAYS = int(os.getenv("RETRAIN_WINDOW_DAYS", "14"))
 
     # ========================================================================
     # Prediction Contract
@@ -55,9 +60,12 @@ class Config:
         Returns:
             True if configuration is valid, False otherwise.
         """
-        # Check that raw data path exists
-        if not Path(cls.RAW_DATA_PATH).exists():
-            print(f"Warning: RAW_DATA_PATH does not exist: {cls.RAW_DATA_PATH}")
+        # Check that baseline training raw path exists
+        if not Path(cls.TRAIN_RAW_DATA_PATH).exists():
+            print(
+                "Warning: TRAIN_RAW_DATA_PATH does not exist: "
+                f"{cls.TRAIN_RAW_DATA_PATH}"
+            )
             return False
 
         # Ensure output directories can be created
@@ -69,10 +77,14 @@ class Config:
     def get_all_settings(cls) -> dict:
         """Return all current settings as a dictionary (for debugging/logging)."""
         return {
-            "raw_data_path": cls.RAW_DATA_PATH,
+            "train_raw_data_path": cls.TRAIN_RAW_DATA_PATH,
+            "simulation_raw_data_path": cls.SIMULATION_RAW_DATA_PATH,
+            "retrain_raw_data_dir": cls.RETRAIN_RAW_DATA_DIR,
+            "retrain_data_dir": cls.RETRAIN_DATA_DIR,
             "bronze_data_path": cls.BRONZE_DATA_PATH,
             "silver_data_path": cls.SILVER_DATA_PATH,
             "gold_data_dir": cls.GOLD_DATA_DIR,
+            "retrain_window_days": cls.RETRAIN_WINDOW_DAYS,
             "prediction_horizon_minutes": cls.PREDICTION_HORIZON_MINUTES,
             "dvc_remote_name": cls.DVC_REMOTE_NAME,
             "dvc_remote_url": cls.DVC_REMOTE_URL,

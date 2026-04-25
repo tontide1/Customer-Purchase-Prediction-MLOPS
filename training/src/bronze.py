@@ -48,6 +48,7 @@ logger = logging.getLogger(__name__)
 RAW_CSV_DTYPES = {
     "event_type": "string",
     "product_id": "string",
+    constants.FIELD_CATEGORY_ID: "string",
     "user_id": "string",
     "user_session": "string",
     "category_code": "string",
@@ -57,6 +58,7 @@ RAW_CSV_DTYPES = {
 BRONZE_STRING_COLUMNS = [
     "event_type",
     "product_id",
+    constants.FIELD_CATEGORY_ID,
     "user_id",
     "user_session",
     "category_code",
@@ -115,6 +117,28 @@ def discover_raw_files(raw_dir: str) -> list:
     return all_files
 
 
+def ensure_not_simulation_raw_input(raw_dir: str) -> None:
+    """
+    Reject simulation raw input for the bronze baseline pipeline.
+
+    Baseline bronze should only ingest train_raw. Simulation raw is reserved for
+    Online Simulation and retraining export flows.
+    """
+    input_path = Path(raw_dir).resolve()
+    simulation_path = Path(Config.SIMULATION_RAW_DATA_PATH).resolve()
+    simulation_dir = simulation_path.parent
+
+    if (
+        input_path == simulation_path
+        or input_path == simulation_dir
+        or simulation_dir in input_path.parents
+    ):
+        raise ValueError(
+            "Bronze baseline input must not read from simulation raw data: "
+            f"{raw_dir}"
+        )
+
+
 def read_raw_chunks(
     raw_dir: str, chunksize: int = 200000
 ) -> Generator[Tuple[Path, pd.DataFrame], None, None]:
@@ -130,6 +154,7 @@ def read_raw_chunks(
     Yields:
         (file_path, chunk_df) tuples
     """
+    ensure_not_simulation_raw_input(raw_dir)
     all_files = discover_raw_files(raw_dir)
 
     for file_path in all_files:
@@ -396,8 +421,11 @@ def main():
     )
     parser.add_argument(
         "--input",
-        default=Config.RAW_DATA_PATH,
-        help=f"Path to raw data directory (default: {Config.RAW_DATA_PATH})",
+        default=Config.TRAIN_RAW_DATA_PATH,
+        help=(
+            "Path to baseline training raw data directory "
+            f"(default: {Config.TRAIN_RAW_DATA_PATH})"
+        ),
     )
     parser.add_argument(
         "--output",

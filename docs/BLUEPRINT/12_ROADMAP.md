@@ -5,7 +5,7 @@
 
 | Tuần | Milestone | Deliverables |
 | --- | --- | --- |
-| **1** | Data Foundation | `data/raw/`, `data/bronze/`, `data/silver/`, config paths, timestamp contract (`source_event_time`, `replay_time`, `prediction_time`), DVC init + MinIO remote setup |
+| **1** | Data Foundation | `data/train_raw/`, `data/simulation_raw/`, `data/retrain_raw/`, `data/bronze/`, `data/silver/`, config paths, timestamp contract (`source_event_time`, `replay_time`, `prediction_time`), DVC init + MinIO remote setup |
 | **2** | Training Pipeline | Session-boundary split, snapshot dataset builder, 10-minute horizon labeling, `data/gold/` artifacts, feature engineering, **multi-model training (XGBoost, LightGBM, Random Forest)**, model comparison & auto-selection, SHAP analysis, MLflow integration, **Data Lineage**, **Model Validation Gate** |
 | **3** | Stream Processing | Quix Streams processor, session-scoped Redis feature store, Kafka topics, timestamp preservation, **cache invalidation logic** |
 | **4** | Serving & API | FastAPI (predict + explain + health) theo `user_session`, security (API Key + rate limit), **Model Hot-Reload**, **Prediction Caching**, unit tests |
@@ -34,7 +34,7 @@
 * Nhấn mạnh `user_session` chỉ được nằm trong đúng một split.
 
 **`docs/BLUEPRINT/05_PROJECT_STRUCTURE.md`**
-* Cập nhật tree thư mục `data/raw/`, `data/bronze/`, `data/silver/`, `data/gold/`.
+* Cập nhật tree thư mục `data/train_raw/`, `data/simulation_raw/`, `data/retrain_raw/`, `data/bronze/`, `data/silver/`, `data/gold/`.
 * Thêm config path tương ứng trong `Settings`.
 
 **`docs/BLUEPRINT/07_TESTING.md`**
@@ -44,7 +44,7 @@
 ### Code Module Plan
 
 **`training/src/config.py`**
-* Thêm `raw_data_path`, `bronze_data_path`, `silver_data_path`, `gold_data_dir`, `prediction_horizon_minutes`.
+* Thêm `train_raw_data_path`, `simulation_raw_data_path`, `retrain_raw_data_dir`, `bronze_data_path`, `silver_data_path`, `gold_data_dir`, `prediction_horizon_minutes`.
 * Thêm config DVC/MinIO (`dvc_remote_name`, `dvc_remote_url`, `s3_endpoint_url`).
 
 **`shared/schemas.py`**
@@ -154,7 +154,7 @@
 ### Verification Plan
 
 1. Raw/bronze/silver/gold docs phải thống nhất.
-2. Không file nào được hard-code `2019-Oct.csv`.
+2. `2019-Oct.csv.gz` chỉ xuất hiện như baseline training contract; `2019-Nov.csv.gz` chỉ xuất hiện như Online Simulation contract.
 3. Không split logic nào được mô tả ở snapshot boundary trước session boundary.
 4. Tests phải assert session disjointness và timestamp preservation.
 5. Event deduplication phải dùng deterministic `event_id`, test verify không update state khi trùng.

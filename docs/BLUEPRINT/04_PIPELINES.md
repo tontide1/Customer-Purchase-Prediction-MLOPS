@@ -8,16 +8,16 @@
 ## Pipeline A: Training Pipeline (Offline — Chạy 1 lần hoặc khi retrain)
 
 ```
-data/raw/<dataset-file>.csv → Bronze parse → Silver clean/sort → Session-boundary split → Gold snapshots
+data/train_raw/2019-Oct.csv.gz → Bronze parse → Silver clean/sort → Session-boundary split → Gold snapshots
     → Train → Evaluate → SHAP Analysis
     → Validation Gate (fail-closed; first deploy auto-pass) → Register to MLflow
 ```
 
-> **Artifact reproducibility:** `raw/bronze/silver/gold` artifacts được version bằng DVC; file thực nằm trên MinIO/S3 remote. Mọi lần train/retrain phải trace được về DVC revision.
+> **Artifact reproducibility:** train/retrain raw, bronze, silver, and gold artifacts được version bằng DVC; file thực nằm trên MinIO/S3 remote. Mọi lần train/retrain phải trace được về DVC revision.
 
 **Chi tiết từng bước:**
 
-1. **Load Raw:** Đọc từ `data/raw/<dataset-file>.csv` qua config `raw_data_path`, validate schema bằng Pydantic.
+1. **Load Raw:** Baseline training đọc từ `data/train_raw/2019-Oct.csv.gz` qua config `train_raw_data_path`, validate schema bằng Pydantic.
 2. **Bronze Parse:** Parse raw CSV, rename `event_time -> source_event_time`, và ghi Parquet vào `data/bronze/`.
 3. **Data Lineage Metadata:** Ngay sau bronze parse, ghi metadata của dataset lên MLflow để đảm bảo **reproducibility** và **traceability**:
     * `raw_file_md5`: MD5 checksum ở mức byte của file CSV gốc.
@@ -59,12 +59,13 @@ data/raw/<dataset-file>.csv → Bronze parse → Silver clean/sort → Session-b
     ```
 
 4. **Silver Clean & Sort:**
-    * Loại bỏ dòng thiếu `user_id`, `user_session`, `event_type`.
-    * Loại bỏ dòng có `price <= 0` hoặc `price > 99th percentile`.
+    * Loại bỏ dòng thiếu `user_id`, `user_session`, `event_type`, `category_id`.
+    * Giữ `price = null`; chỉ loại dòng có `price <= 0`.
     * Xử lý null `category_code`: dùng `category_id` làm fallback để đảm bảo `unique_categories` không bị undercount (accessories không có `category_code`).
     * Ghi chú: `brand` null là expected — không loại bỏ dòng, dùng như signal cho `has_brand_info` (optional, xem mục 5.1).
     * Log số dòng bị loại và lý do.
     * Log `row_count_cleaned` lên MLflow sau khi clean.
+    * Loại duplicate theo canonical event key: `user_session`, `source_event_time`, `event_type`, `product_id`, `user_id`.
     * Sort deterministic theo `user_session` + `source_event_time`.
     * Ghi Parquet vào `data/silver/`.
 5. **Session Index & Split Assignment:**
@@ -230,7 +231,7 @@ Simulator/User App → Kafka → Quix Streams → Redis + PostgreSQL → FastAPI
 
 **Chi tiết từng bước:**
 
-1. **Ingest:** `simulator.py` đọc CSV → Validate event → Preserve `source_event_time` → Gắn thêm `replay_time` → Gửi vào Kafka topic `raw_events`.
+1. **Ingest:** `simulator.py` đọc `data/simulation_raw/2019-Nov.csv.gz` → Validate event → Preserve `source_event_time` → Gắn thêm `replay_time` → Gửi vào Kafka topic `raw_events`.
    * Events không hợp lệ → Log warning, skip (không gửi vào Kafka).
 2. **Process:** Quix Streams worker:
    * Consume từ Kafka → Update session state incrementally theo `user_session` → Ghi Redis (real-time) + PostgreSQL (historical).
@@ -311,16 +312,16 @@ def calculate_kl_divergence(p: np.ndarray, q: np.ndarray) -> float:
 
 > **Quy tắc quan trọng:** Retraining luôn đi qua **data lake pipeline** (raw → bronze → silver → gold). Không train trực tiếp từ PostgreSQL query. PostgreSQL chỉ cung cấp input events cho bước re-materialize.
 
-1. Export dữ liệu mới từ PostgreSQL (7-14 ngày gần nhất).
+1. Export dữ liệu mới từ PostgreSQL, mặc định rolling window 14 ngày từ events Nov đã replay.
 2. **Re-materialize** dữ liệu mới qua pipeline:
-   - Ghi vào `data/raw/` (giữ nguyên format như Kaggle source)
-   - Chạy `bronze.py` → `data/bronze/`
-   - Chạy `silver.py` → `data/silver/`
-   - Chạy `session_split.py` + `gold.py` → `data/gold/` (**recompute split theo `session_start_time` trên retrain window 7-14 ngày**, không dùng split map cũ như mapping cứng)
+   - Ghi vào `data/retrain_raw/<window_id>/events.csv.gz` (giữ nguyên format như Kaggle source)
+   - Chạy `bronze.py` → `data/retrain/bronze/<window_id>/`
+   - Chạy `silver.py` → `data/retrain/silver/<window_id>/`
+   - Chạy `session_split.py` + `gold.py` → `data/retrain/gold/<window_id>/` (**recompute split theo `session_start_time` trên retrain window**, không dùng split map cũ như mapping cứng)
 3. Với outputs đã có trong `dvc.yaml`: chạy `dvc repro` rồi `dvc push` để lưu artifacts retrain window lên remote MinIO/S3.
 4. Chỉ dùng `dvc add` cho artifacts ad-hoc chưa nằm trong pipeline definition.
 5. Tính PSI và KL Divergence so với training data gốc.
-6. Nếu vượt threshold → Chạy lại Pipeline A với dữ liệu gold mới (bao gồm log Data Lineage của data mới + `dvc_data_revision`).
+6. Nếu vượt threshold → Retrain từ baseline Oct gold artifacts + retrain-window Nov gold artifacts (bao gồm log Data Lineage của data mới + `dvc_data_revision`).
 7. **Model Validation Gate** tự động so sánh model mới vs model production hiện tại (xem Pipeline A, bước 10).
 8. Nếu gate **pass** → Register model mới lên MLflow → Transition sang `Production` → FastAPI **tự động hot-reload** model mới trong vòng 5 phút (không cần restart).
 9. Nếu gate **fail** → Giữ model cũ, log warning kèm metrics comparison → Grafana alert thông báo → Cần review thủ công.

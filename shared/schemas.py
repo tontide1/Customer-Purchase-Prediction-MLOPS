@@ -21,6 +21,7 @@ RAW_SCHEMA = pa.schema(
         (constants.FIELD_EVENT_TIME, pa.timestamp("us")),
         ("event_type", pa.string()),
         ("product_id", pa.string()),
+        (constants.FIELD_CATEGORY_ID, pa.string()),
         ("user_id", pa.string()),
         ("user_session", pa.string()),
         ("category_code", pa.string()),  # nullable
@@ -40,6 +41,7 @@ BRONZE_SCHEMA = pa.schema(
         (constants.FIELD_SOURCE_EVENT_TIME, pa.timestamp("us")),
         ("event_type", pa.string()),
         ("product_id", pa.string()),
+        (constants.FIELD_CATEGORY_ID, pa.string()),
         ("user_id", pa.string()),
         ("user_session", pa.string()),
         ("category_code", pa.string()),  # nullable
@@ -59,6 +61,7 @@ SILVER_SCHEMA = pa.schema(
         (constants.FIELD_SOURCE_EVENT_TIME, pa.timestamp("us")),
         ("event_type", pa.string()),
         ("product_id", pa.string()),
+        (constants.FIELD_CATEGORY_ID, pa.string()),
         ("user_id", pa.string()),
         ("user_session", pa.string()),
         ("category_code", pa.string()),  # nullable

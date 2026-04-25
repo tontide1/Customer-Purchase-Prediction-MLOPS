@@ -16,14 +16,14 @@
 - Start local object storage: `docker compose up -d` (MinIO only).
 - Quick health check: `docker compose ps` (MinIO ports `9000` API, `9001` console).
 - Week 1 pipeline commands:
-  - `python training/src/bronze.py --input data/raw --output data/bronze/events.parquet`
+  - `python training/src/bronze.py --input data/train_raw --output data/bronze/events.parquet`
   - `python training/src/silver.py --input data/bronze/events.parquet --output data/silver/events.parquet`
   - `dvc repro` runs only `bronze` -> `silver` per current `dvc.yaml`.
 
 ## Data pipeline gotchas that cause real failures
 - Keep schema field order from `schemas.BRONZE_SCHEMA` / `schemas.SILVER_SCHEMA` when selecting columns; do not build column order from sets.
 - Bronze write path is strict on dtypes (PyArrow schema cast): ensure IDs/categorical fields stay string-like before `pa.Table.from_pandas(...)`.
-- Bronze input reader supports both `*.csv` and `*.csv.gz` under `data/raw/`; avoid hard-coding dataset filenames.
+- Bronze input reader supports both `*.csv` and `*.csv.gz` under `data/train_raw/`; baseline training is intentionally scoped to `2019-Oct.csv.gz` and must not mix in `data/simulation_raw/`.
 - Raw layer contract: keep source `event_time`; internal layers must use `source_event_time`.
 
 ## Contracts to preserve when touching architecture/docs

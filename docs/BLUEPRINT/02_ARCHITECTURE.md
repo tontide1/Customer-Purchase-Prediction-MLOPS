@@ -81,7 +81,7 @@ Hệ thống hoạt động theo mô hình **Event-Driven Microservices**, chia 
   * Phục vụ phân tích sau (post-hoc analysis) và retraining model.
 
 * **Artifact Storage (Data Lake Remote):** **MinIO** (S3-compatible object storage).
-  * Lưu file artifacts lớn của `data/raw`, `data/bronze`, `data/silver`, `data/gold`.
+  * Lưu file artifacts lớn của `data/train_raw`, `data/retrain_raw`, `data/bronze`, `data/silver`, `data/gold`.
   * Là remote backend cho DVC (`dvc push`/`dvc pull`).
 
 * **Data Versioning:** **DVC**.
@@ -90,7 +90,7 @@ Hệ thống hoạt động theo mô hình **Event-Driven Microservices**, chia 
 
 * **Model Registry:** **MLflow** — Quản lý model versions, metrics, artifacts.
 
-> **Scope boundary:** DVC + MinIO là source of truth cho data artifacts (`raw/bronze/silver/gold`). MLflow là source of truth cho model registry và experiment metrics.
+> **Scope boundary:** DVC + MinIO là source of truth cho train/retrain data artifacts (`raw/bronze/silver/gold`). MLflow là source of truth cho model registry và experiment metrics.
 
 ### Tầng 3: Serving (Phục vụ)
 
@@ -278,7 +278,7 @@ services:
     ┌──────────────────────────────┐
     │  Pipeline C: Retraining      │
     │  (từ 04_PIPELINES.md)        │
-    │  - Export data từ PostgreSQL │
+    │  - Export Nov window từ DB   │
     │  - Re-materialize qua DLs    │
     │  - dvc push artifacts mới    │
     │  - Train multi-models        │

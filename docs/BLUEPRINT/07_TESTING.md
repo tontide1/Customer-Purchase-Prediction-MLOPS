@@ -250,7 +250,9 @@ class TestPredictionCache:
 
 ## 10.5. Integration Tests
 
-* **Raw → Bronze:** Gửi raw CSV sample, verify `event_time` được parse thành `source_event_time` và Parquet bronze được ghi đúng.
+* **Train Raw → Bronze:** Gửi sample theo `data/train_raw/` contract, verify `event_time` được parse thành `source_event_time` và Parquet bronze được ghi đúng.
+* **Simulation Raw Isolation:** Verify `data/simulation_raw/2019-Nov.csv.gz` không bị baseline bronze stage đọc trực tiếp.
+* **Retrain Export Contract:** Verify database export cho retraining được materialize vào `data/retrain_raw/<window_id>/` trước khi qua bronze/silver/gold.
 * **Bronze → Silver:** Verify clean/null/outlier/sort logic tạo silver Parquet đúng và deterministic.
 * **Silver → Session Split:** Verify cùng một `user_session` chỉ nằm trong một split và split assignment không overlap.
 * **Silver → Gold:** Verify snapshot dataset sinh đúng features + label 10 phút tới theo split assignment.
