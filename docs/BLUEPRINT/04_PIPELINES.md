@@ -1,6 +1,6 @@
 # 4. Chi tiết các Pipelines (Data Flow Spec)
 
-> **← Xem [3. Features](03_FEATURES.md)**  
+> **← Xem [3. Features](03_FEATURES.md)**
 > **→ Xem [5. Project Structure](05_PROJECT_STRUCTURE.md)**
 
 > **Execution profile (local dev): `DEV_SMOKE`**
@@ -401,11 +401,11 @@ CREATE TABLE predictions (
     fallback_reason VARCHAR NULL,
     horizon_minutes INT,
     source_event_time TIMESTAMP,
-    
+
     -- Ground truth (filled 10 minutes later)
     actual_purchase INT DEFAULT NULL,  -- 0 or 1
     ground_truth_time TIMESTAMP DEFAULT NULL,
-    
+
     -- Metrics
     is_correct_prediction BOOLEAN DEFAULT NULL,  -- TRUE if (pred >= 0.5) == actual_purchase
     created_at TIMESTAMP DEFAULT NOW()

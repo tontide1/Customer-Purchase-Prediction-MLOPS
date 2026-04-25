@@ -1,6 +1,6 @@
 # 1. Tổng quan (Overview)
 
-> **← Xem [BLUEPRINT.md gốc](../../BLUEPRINT.md)**  
+> **← Xem [BLUEPRINT.md gốc](../../BLUEPRINT.md)**
 > **→ Xem [2. Architecture](02_ARCHITECTURE.md)**
 
 > **Execution profile (local dev): `DEV_SMOKE`**
@@ -31,7 +31,7 @@ trong thời gian thực với độ trễ **< 1 giây**.
 
 # 2. Dữ liệu (Data Strategy)
 
-> **← Xem [1. Overview](01_OVERVIEW.md)**  
+> **← Xem [1. Overview](01_OVERVIEW.md)**
 > **→ Xem [2. Architecture](02_ARCHITECTURE.md)**
 
 ## 2.1. Nguồn dữ liệu

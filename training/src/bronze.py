@@ -289,8 +289,7 @@ def ensure_not_simulation_raw_input(raw_dir: str) -> None:
         or simulation_dir in input_path.parents
     ):
         raise ValueError(
-            "Bronze baseline input must not read from simulation raw data: "
-            f"{raw_dir}"
+            f"Bronze baseline input must not read from simulation raw data: {raw_dir}"
         )
 
 
@@ -661,7 +660,7 @@ def main():
 
     try:
         # Run chunked pipeline
-        logger.info(f"\n1. Reading and transforming raw data in chunks...")
+        logger.info("\n1. Reading and transforming raw data in chunks...")
         stats = write_bronze_parquet_chunked(
             args.input,
             args.output,

@@ -1,6 +1,6 @@
 # 2. Kiến trúc Hệ thống (System Architecture)
 
-> **← Xem [1. Overview](01_OVERVIEW.md)**  
+> **← Xem [1. Overview](01_OVERVIEW.md)**
 > **→ Xem [3. Features](03_FEATURES.md)**
 
 > **Execution profile (local dev): `DEV_SMOKE`**
@@ -222,7 +222,7 @@ services:
 
 # 3. Technology Stack
 
-> **← Xem [2. Architecture](02_ARCHITECTURE.md)**  
+> **← Xem [2. Architecture](02_ARCHITECTURE.md)**
 > **→ Xem [3. Features](03_FEATURES.md)**
 
 | Thành phần | Công nghệ | Vai trò cụ thể |
@@ -250,7 +250,7 @@ services:
 
 # 4. Closed-Loop MLOps Orchestration
 
-> **← Xem [4. Technology Stack](02_ARCHITECTURE.md)**  
+> **← Xem [4. Technology Stack](02_ARCHITECTURE.md)**
 > **→ Xem [3. Features](03_FEATURES.md)**
 
 ## 4.1. Retraining Trigger & Orchestration

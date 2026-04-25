@@ -11,6 +11,7 @@ from training.src.silver import (
     get_silver_sort_columns,
     normalize_category_code,
     read_bronze_parquet,
+    run_silver_pipeline,
     sort_deterministic,
     validate_silver_sort_columns,
     write_silver_parquet,
@@ -29,6 +30,7 @@ def _sample_silver_df() -> pd.DataFrame:
             ),
             "event_type": ["cart", "cart", "view"],
             "product_id": ["2", "1", "3"],
+            constants.FIELD_CATEGORY_ID: ["c2", "c1", "c3"],
             "user_id": ["u2", "u1", "u3"],
             "user_session": ["s1", "s1", "s1"],
             "category_code": [None, "cat-1", None],
@@ -124,3 +126,42 @@ def test_category_code_policy_keep_and_fill():
 
     filled = normalize_category_code(df.copy(), policy="fill", fill_value="unknown")
     assert filled["category_code"].tolist() == ["unknown", "cat-1", "unknown"]
+
+
+def test_run_silver_pipeline_streams_batches_and_global_dedups(tmp_path):
+    bronze_dir = tmp_path / "bronze_dataset"
+    output_file = tmp_path / "events.parquet"
+    bronze_dir.mkdir()
+
+    df = _sample_silver_df()
+    df = pd.concat([df, df.iloc[[0]]], ignore_index=True)
+    table = pa.Table.from_pandas(df, schema=schemas.BRONZE_SCHEMA)
+    pq.write_table(table.slice(0, 2), bronze_dir / "part-0.parquet")
+    pq.write_table(table.slice(2, 2), bronze_dir / "part-1.parquet")
+
+    stats = run_silver_pipeline(str(bronze_dir), str(output_file), batch_size=1)
+
+    round_trip = read_bronze_parquet(str(output_file))
+    assert stats.input_rows == 4
+    assert stats.duplicate_rows == 1
+    assert stats.output_rows == 3
+    assert round_trip["product_id"].tolist() == ["1", "2", "3"]
+
+    output_schema = pq.read_table(output_file).schema.remove_metadata()
+    assert output_schema == schemas.SILVER_SCHEMA
+
+
+def test_run_silver_pipeline_is_stable_across_repeated_runs(tmp_path):
+    bronze_file = tmp_path / "bronze.parquet"
+    output_one = tmp_path / "silver-one.parquet"
+    output_two = tmp_path / "silver-two.parquet"
+
+    table = pa.Table.from_pandas(_sample_silver_df(), schema=schemas.BRONZE_SCHEMA)
+    pq.write_table(table, bronze_file)
+
+    run_silver_pipeline(str(bronze_file), str(output_one), batch_size=1)
+    run_silver_pipeline(str(bronze_file), str(output_two), batch_size=2)
+
+    first = read_bronze_parquet(str(output_one))
+    second = read_bronze_parquet(str(output_two))
+    pd.testing.assert_frame_equal(first, second)

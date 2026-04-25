@@ -1,6 +1,6 @@
 # 10. Performance Measurement
 
-> **← Xem [9. Explainability](09_EXPLAINABILITY.md)**  
+> **← Xem [9. Explainability](09_EXPLAINABILITY.md)**
 > **→ Xem [11. Demo](11_DEMO.md)**
 
 > **Execution profile (local dev): `DEV_SMOKE`**

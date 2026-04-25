@@ -1,6 +1,6 @@
 # 8. Security Considerations
 
-> **← Xem [7. Testing](07_TESTING.md)**  
+> **← Xem [7. Testing](07_TESTING.md)**
 > **→ Xem [9. Explainability](09_EXPLAINABILITY.md)**
 
 > **Execution profile (local dev): `DEV_SMOKE`**

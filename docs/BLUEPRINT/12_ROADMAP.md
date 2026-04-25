@@ -1,6 +1,6 @@
 # 12. Roadmap triển khai
 
-> **← Xem [11. Demo](11_DEMO.md)**  
+> **← Xem [11. Demo](11_DEMO.md)**
 > **→ Xem [BLUEPRINT.md gốc](../../BLUEPRINT.md)**
 
 > **Execution profile (local dev): `DEV_SMOKE`**

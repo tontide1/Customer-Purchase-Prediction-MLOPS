@@ -12,9 +12,7 @@ Tests core transformations:
 import importlib
 import pytest
 import pandas as pd
-import pyarrow as pa
 from pathlib import Path
-import tempfile
 import sys
 
 # Add parent directory to path
@@ -126,7 +124,11 @@ class TestBronzeLayer:
         df_bronze = transform_to_bronze(df)
 
         assert constants.FIELD_CATEGORY_ID in df_bronze.columns
-        assert df_bronze[constants.FIELD_CATEGORY_ID].tolist() == ["cat1", "cat2", "cat3"]
+        assert df_bronze[constants.FIELD_CATEGORY_ID].tolist() == [
+            "cat1",
+            "cat2",
+            "cat3",
+        ]
 
     def test_valid_event_type_kept(self, sample_raw_df):
         """Test that records with valid event_type are kept."""
@@ -329,8 +331,6 @@ class TestTimestampContract:
 
     def test_timestamp_preserved_through_layers(self, sample_raw_df):
         """Test that timestamp value is preserved raw → bronze."""
-        original_time = "2019-10-01 10:00:00 UTC"
-
         # Parse and transform
         df = parse_event_time(sample_raw_df.copy())
         df_bronze = transform_to_bronze(df)

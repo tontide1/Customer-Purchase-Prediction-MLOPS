@@ -53,14 +53,14 @@ def test_select_raw_files_training_window(tmp_path, bronze_module):
 def test_select_raw_files_replay_window(tmp_path, bronze_module):
     _create_raw_files(
         tmp_path,
-            [
-                "2019-Oct.csv.gz",
-                "2019-Nov.csv.gz",
-                "2019-Dec.csv.gz",
-                "2020-Jan.csv.gz",
-                "2020-Feb.csv.gz",
-                "2020-Mar.csv.gz",
-                "2020-Apr.csv.gz",
+        [
+            "2019-Oct.csv.gz",
+            "2019-Nov.csv.gz",
+            "2019-Dec.csv.gz",
+            "2020-Jan.csv.gz",
+            "2020-Feb.csv.gz",
+            "2020-Mar.csv.gz",
+            "2020-Apr.csv.gz",
         ],
     )
 

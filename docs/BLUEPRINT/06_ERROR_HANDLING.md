@@ -1,6 +1,6 @@
 # 6. Error Handling & Logging
 
-> **← Xem [5. Project Structure](05_PROJECT_STRUCTURE.md)**  
+> **← Xem [5. Project Structure](05_PROJECT_STRUCTURE.md)**
 > **→ Xem [7. Testing](07_TESTING.md)**
 
 > **Execution profile (local dev): `DEV_SMOKE`**

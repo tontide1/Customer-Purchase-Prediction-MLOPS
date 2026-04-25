@@ -1,6 +1,6 @@
 # 5. Cấu trúc Dự án (Project Structure)
 
-> **← Xem [4. Pipelines](04_PIPELINES.md)**  
+> **← Xem [4. Pipelines](04_PIPELINES.md)**
 > **→ Xem [6. Error Handling](06_ERROR_HANDLING.md)**
 
 > **Execution profile (local dev): `DEV_SMOKE`**
@@ -193,7 +193,7 @@ REAL-TIME-ECOMMERCE-INTENT-SYSTEM/
 
 # 6. Configuration Management
 
-> **← Xem [5. Project Structure](05_PROJECT_STRUCTURE.md)**  
+> **← Xem [5. Project Structure](05_PROJECT_STRUCTURE.md)**
 > **→ Xem [6. Error Handling](06_ERROR_HANDLING.md)**
 
 Tất cả config được quản lý qua **environment variables**, load bằng **pydantic-settings**.

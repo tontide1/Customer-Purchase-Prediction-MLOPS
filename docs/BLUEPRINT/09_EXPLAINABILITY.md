@@ -1,6 +1,6 @@
 # 9. Model Explainability
 
-> **← Xem [8. Security](08_SECURITY.md)**  
+> **← Xem [8. Security](08_SECURITY.md)**
 > **→ Xem [10. Performance](10_PERFORMANCE.md)**
 
 > **Execution profile (local dev): `DEV_SMOKE`**

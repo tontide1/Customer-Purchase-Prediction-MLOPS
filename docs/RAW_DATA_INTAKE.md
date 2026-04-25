@@ -6,7 +6,7 @@ The raw data layer is split by role so baseline training never mixes with online
 ## Source Data
 - **Location**: `dataset/*.csv.gz`
 - **Format**: Compressed CSV with gzip
-- **Fields**: 
+- **Fields**:
   - `event_time`: UTC timestamp (format: "YYYY-MM-DD HH:MM:SS UTC")
   - `event_type`: Type of user event (view, cart, remove_from_cart, purchase)
   - `product_id`: Product identifier
@@ -36,7 +36,7 @@ The raw data layer is split by role so baseline training never mixes with online
 - **Audit Trail**: Source file and ingestion time can be tracked if needed in future iterations
 
 ## Downstream Transformation
-- **Bronze Layer** (`training/src/bronze.py`): 
+- **Bronze Layer** (`training/src/bronze.py`):
   - Renames `event_time` → `source_event_time`
   - Validates `event_type` against allowed values
   - Rejects invalid records (logs count)

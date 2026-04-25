@@ -1,6 +1,6 @@
 # 3. Feature Engineering
 
-> **← Xem [2. Architecture](02_ARCHITECTURE.md)**  
+> **← Xem [2. Architecture](02_ARCHITECTURE.md)**
 > **→ Xem [4. Pipelines](04_PIPELINES.md)**
 
 > **Execution profile (local dev): `DEV_SMOKE`**

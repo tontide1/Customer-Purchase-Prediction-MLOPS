@@ -1,6 +1,6 @@
 # 11. Kịch bản Demo (The Demo Script)
 
-> **← Xem [10. Performance](10_PERFORMANCE.md)**  
+> **← Xem [10. Performance](10_PERFORMANCE.md)**
 > **→ Xem [12. Roadmap](12_ROADMAP.md)**
 
 > **Execution profile (local dev): `DEV_SMOKE`**

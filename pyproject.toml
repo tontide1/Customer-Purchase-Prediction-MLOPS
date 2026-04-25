@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "iuh-final-mlops"
+version = "0.1.0"
+description = "Week 1 data foundation pipeline for the IUH MLOps final project."
+readme = { text = "IUH MLOps final project data foundation package.", content-type = "text/markdown" }
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "pandas==3.0.2",
+    "pyarrow==24.0.0",
+    "python-dotenv==1.2.2",
+    "psutil==7.2.2",
+    "dvc[s3]==3.67.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.0.3",
+    "ruff",
+    "mypy",
+    "pre-commit",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["shared*", "training*"]
+
+[tool.pytest.ini_options]
+testpaths = ["training/tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+exclude = [
+    ".opencode",
+    "notebooks",
+    "notebook-planned",
+]
+
+[tool.mypy]
+python_version = "3.11"
+packages = ["shared", "training"]
+ignore_missing_imports = true

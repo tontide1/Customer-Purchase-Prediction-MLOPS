@@ -1,6 +1,6 @@
 # 7. Testing Strategy
 
-> **← Xem [6. Error Handling](06_ERROR_HANDLING.md)**  
+> **← Xem [6. Error Handling](06_ERROR_HANDLING.md)**
 > **→ Xem [8. Security](08_SECURITY.md)**
 
 > **Execution profile (local dev): `DEV_SMOKE`**
