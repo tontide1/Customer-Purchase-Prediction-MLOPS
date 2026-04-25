@@ -5,7 +5,7 @@
 
 > **Execution profile (local dev): `DEV_SMOKE`**
 > - Train window (dev): `2019-10` -> `2019-10`
-> - Replay window (dev): `2020-03` -> `2020-03`
+> - Replay window (dev): `2019-11` -> `2019-11`
 > - Profile này chỉ để tăng tốc vòng lặp phát triển; canonical target-state windows trong blueprint vẫn giữ nguyên.
 
 | Tuần | Milestone | Deliverables |
@@ -97,7 +97,7 @@
 * Persist SHAP artifacts sau train.
 
 **`training/src/retrain.py`**
-* Export events từ PostgreSQL (7-14 ngày gần nhất).
+* Export events từ PostgreSQL (7 ngày gần nhất).
 * **Re-materialize** qua bronze → silver → gold pipeline với lineage metadata.
 * Chạy `dvc push` cho artifacts mới lên MinIO remote.
 * Chạy training từ gold artifacts (không train trực tiếp từ PostgreSQL).

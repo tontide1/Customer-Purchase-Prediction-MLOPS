@@ -10,11 +10,11 @@ import pytest
 def bronze_module(monkeypatch):
     monkeypatch.setenv("DATA_WINDOW_PROFILE", "dev_smoke")
     monkeypatch.setenv("TRAINING_WINDOW_START", "2019-10")
-    monkeypatch.setenv("TRAINING_WINDOW_END", "2020-02")
+    monkeypatch.setenv("TRAINING_WINDOW_END", "2019-10")
     monkeypatch.setenv("DEV_SMOKE_WINDOW_START", "2019-10")
     monkeypatch.setenv("DEV_SMOKE_WINDOW_END", "2019-10")
-    monkeypatch.setenv("REPLAY_WINDOW_START", "2020-03")
-    monkeypatch.setenv("REPLAY_WINDOW_END", "2020-04")
+    monkeypatch.setenv("REPLAY_WINDOW_START", "2019-11")
+    monkeypatch.setenv("REPLAY_WINDOW_END", "2019-11")
 
     config_module = importlib.import_module("training.src.config")
     bronze_module = importlib.import_module("training.src.bronze")
@@ -47,28 +47,26 @@ def test_select_raw_files_training_window(tmp_path, bronze_module):
 
     assert [path.name for path in selected] == [
         "2019-Oct.csv.gz",
-        "2019-Nov.csv.gz",
-        "2019-Dec.csv.gz",
-        "2020-Jan.csv.gz",
-        "2020-Feb.csv.gz",
     ]
 
 
 def test_select_raw_files_replay_window(tmp_path, bronze_module):
     _create_raw_files(
         tmp_path,
-        [
-            "2019-Dec.csv.gz",
-            "2020-Jan.csv.gz",
-            "2020-Feb.csv.gz",
-            "2020-Mar.csv.gz",
-            "2020-Apr.csv.gz",
+            [
+                "2019-Oct.csv.gz",
+                "2019-Nov.csv.gz",
+                "2019-Dec.csv.gz",
+                "2020-Jan.csv.gz",
+                "2020-Feb.csv.gz",
+                "2020-Mar.csv.gz",
+                "2020-Apr.csv.gz",
         ],
     )
 
     selected = bronze_module.select_raw_files(str(tmp_path), window_profile="replay")
 
-    assert [path.name for path in selected] == ["2020-Mar.csv.gz", "2020-Apr.csv.gz"]
+    assert [path.name for path in selected] == ["2019-Nov.csv.gz"]
 
 
 def test_select_raw_files_dev_smoke_window(tmp_path, bronze_module):

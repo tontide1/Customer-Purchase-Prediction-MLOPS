@@ -5,8 +5,8 @@
 
 > **Execution profile (local dev): `DEV_SMOKE`**
 > - Train window (dev): `2019-10` -> `2019-10`
-> - Replay window (dev): `2020-03` -> `2020-03`
-> - Profile này chỉ để tăng tốc vòng lặp phát triển; canonical target-state windows trong blueprint vẫn giữ nguyên.
+> - Replay window (dev): `2019-11` -> `2019-11`
+> - Project contract hiện tại: `2019-Oct.csv.gz` cho baseline training, `2019-Nov.csv.gz` cho replay.
 
 ---
 
@@ -25,15 +25,15 @@ data/raw/*.csv(.gz) -> Window selection -> Bronze ingestion (chunked, partitione
 
 ## Usage Windows Overview
 
-* **Training window:** `2019-10` -> `2020-02`.
-* **Replay/demo window:** `2020-03` -> `2020-04`.
-* **DEV_SMOKE window (local dev):** training `2019-10` -> `2019-10`, replay `2020-03` -> `2020-03`.
-* **Retraining window:** export từ PostgreSQL rồi re-materialize vào `data/raw/` trước khi chạy pipeline.
+* **Training window:** `2019-10` -> `2019-10`.
+* **Replay/demo window:** `2019-11` -> `2019-11`.
+* **DEV_SMOKE window (local dev):** training `2019-10` -> `2019-10`, replay `2019-11` -> `2019-11`.
+* **Retraining window:** export replay events từ PostgreSQL sau 7 ngày rồi re-materialize vào `data/retrain_raw/` trước khi chạy pipeline.
 
 **Chi tiết từng bước:**
 
 1. **Select Training Window:** Chọn usage window cho offline training trong raw source pool `data/raw/`.
-   * Training pipeline mặc định dùng window `2019-10` -> `2020-02`.
+   * Training pipeline mặc định dùng window `2019-10` -> `2019-10`.
    * Khi iterate local với `DEV_SMOKE`, dùng `2019-10` -> `2019-10`.
 
 2. **Bronze Ingestion:**
@@ -231,7 +231,7 @@ Simulator/User App → Kafka → Quix Streams → Redis + PostgreSQL → FastAPI
 
 **Chi tiết từng bước:**
 
-1. **Ingest:** `simulator.py` đọc replay window từ raw source pool trong `data/raw/` -> validate event -> preserve `source_event_time` -> gắn thêm `replay_time` -> gửi vào Kafka topic `raw_events`.
+1. **Ingest:** `simulator.py` đọc replay window `2019-Nov.csv.gz` từ replay/simulation raw source -> validate event -> preserve `source_event_time` -> gắn thêm `replay_time` -> gửi vào Kafka topic `raw_events`.
    * Events không hợp lệ → Log warning, skip (không gửi vào Kafka).
 2. **Process:** Quix Streams worker:
    * Consume từ Kafka → Update session state incrementally theo `user_session` → Ghi Redis (real-time) + PostgreSQL (historical).
@@ -312,7 +312,7 @@ def calculate_kl_divergence(p: np.ndarray, q: np.ndarray) -> float:
 
 > **Quy tắc quan trọng:** Retraining luôn đi qua **data lake pipeline** (raw → bronze → silver → gold). Không train trực tiếp từ PostgreSQL query. PostgreSQL chỉ cung cấp input events cho bước re-materialize.
 
-1. Export dữ liệu mới từ PostgreSQL theo retraining window vận hành.
+1. Export dữ liệu replay đã lưu từ PostgreSQL theo retraining window 7 ngày.
 2. Materialize dữ liệu export vào `data/raw/` theo format tương thích với raw contract.
 3. Chạy bronze ingestion -> `data/bronze/`.
 4. Chạy silver pipeline -> `data/silver/`.
@@ -364,7 +364,7 @@ Nếu PR-AUC < 0.7 → Trigger retrain alert
       "evaluation_mode": "demo_replay",
       "fallback_reason": null,
       "horizon_minutes": 10,
-      "source_event_time": "2020-04-12T10:25:00Z"
+      "source_event_time": "2019-11-12T10:25:00Z"
     }
    ```
    → Lưu vào PostgreSQL table `predictions`.

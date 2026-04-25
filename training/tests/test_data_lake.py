@@ -433,7 +433,7 @@ class TestDataPathConfig:
         )
         assert fresh_config_module.Config.RETRAIN_RAW_DATA_DIR == "data/retrain_raw"
         assert fresh_config_module.Config.RETRAIN_DATA_DIR == "data/retrain"
-        assert fresh_config_module.Config.RETRAIN_WINDOW_DAYS == 14
+        assert fresh_config_module.Config.RETRAIN_WINDOW_DAYS == 7
 
         settings = fresh_config_module.Config.get_all_settings()
         assert "raw_data_path" not in settings

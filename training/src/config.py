@@ -24,7 +24,20 @@ class Config:
     BRONZE_DATA_PATH = os.getenv("BRONZE_DATA_PATH", "data/bronze/events.parquet")
     SILVER_DATA_PATH = os.getenv("SILVER_DATA_PATH", "data/silver/events.parquet")
     GOLD_DATA_DIR = os.getenv("GOLD_DATA_DIR", "data/gold")
-    RETRAIN_WINDOW_DAYS = int(os.getenv("RETRAIN_WINDOW_DAYS", "14"))
+    RETRAIN_WINDOW_DAYS = int(os.getenv("RETRAIN_WINDOW_DAYS", "7"))
+
+    # ========================================================================
+    # Raw Data Window Selection
+    # ========================================================================
+    # Baseline training is intentionally scoped to 2019-Oct. Online replay uses
+    # 2019-Nov and must be persisted/exported before it is used for retraining.
+    DATA_WINDOW_PROFILE = os.getenv("DATA_WINDOW_PROFILE", "training")
+    TRAINING_WINDOW_START = os.getenv("TRAINING_WINDOW_START", "2019-10")
+    TRAINING_WINDOW_END = os.getenv("TRAINING_WINDOW_END", "2019-10")
+    DEV_SMOKE_WINDOW_START = os.getenv("DEV_SMOKE_WINDOW_START", "2019-10")
+    DEV_SMOKE_WINDOW_END = os.getenv("DEV_SMOKE_WINDOW_END", "2019-10")
+    REPLAY_WINDOW_START = os.getenv("REPLAY_WINDOW_START", "2019-11")
+    REPLAY_WINDOW_END = os.getenv("REPLAY_WINDOW_END", "2019-11")
 
     # ========================================================================
     # Prediction Contract
