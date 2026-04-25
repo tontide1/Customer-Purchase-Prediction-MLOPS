@@ -1,11 +1,16 @@
-# 10. Testing Strategy
+# 7. Testing Strategy
 
 > **← Xem [6. Error Handling](06_ERROR_HANDLING.md)**  
 > **→ Xem [8. Security](08_SECURITY.md)**
 
+> **Execution profile (local dev): `DEV_SMOKE`**
+> - Train window (dev): `2019-10` -> `2019-10`
+> - Replay window (dev): `2020-03` -> `2020-03`
+> - Profile này chỉ để tăng tốc vòng lặp phát triển; canonical target-state windows trong blueprint vẫn giữ nguyên.
+
 ---
 
-## 10.1. Unit Tests (Pytest)
+## 7.1. Unit Tests (Pytest)
 
 * **Feature Engineering:** Test snapshot builder và từng function tạo feature (input → expected output), đảm bảo chỉ dùng past events tại thời điểm `t`.
 * **Labeling Logic:** Test `purchase within next 10 minutes` được gán đúng cho cùng `user_session`.
@@ -18,10 +23,18 @@
 * **Late Event Handling:** Test policy cho out-of-order events. Gửi event với `source_event_time` trễ hơn `source_last_event_time` - ngưỡng → verify không cập nhật online state, gửi vào `late_events`.
 * **Manual Event Handling:** Test Streamlit manual events có `source = "manual"` và `source_event_time = replay_time_now`.
 * **Exact Count Parity:** Test Redis Set counts khớp chính xác với offline exact counts cho `unique_products`, `unique_categories`.
+* **Bronze Chunked Ingestion Contract:** Test raw source pool nhiều file vẫn được xử lý theo chunk, không yêu cầu load toàn bộ dataset vào một DataFrame duy nhất.
+* **Bronze Row-Count Parity:** Test tổng số dòng valid/rejected sau bronze vẫn đúng khi input trải trên nhiều raw files.
+* **Multi-File Timestamp Preservation:** Test nhiều raw files vẫn preserve đúng `source_event_time` sau bronze materialization.
+* **Cross-Month Session Boundary:** Test session kéo qua ranh giới tháng vẫn được giữ nguyên một `user_session` logic ở downstream split stage.
+* **Split Map Disjointness:** Test `session_split_map.parquet` luôn đảm bảo train/val/test disjoint theo `user_session`.
+* **Window Isolation:** Test training window và replay/demo window không bị trộn dữ liệu.
+* **Materialization Strategy Invariance:** Test thay đổi cách materialize bronze/silver không làm đổi exact counts và downstream labeling semantics.
+* **Stale Contract Detection:** Test/lint scan fail nếu docs/config còn reference contract cũ như `data/bronze/events.parquet`, `data/silver/events.parquet`, `raw_data_path`, `bronze_data_path`, `silver_data_path`.
 
 ---
 
-## 10.2. Model Validation Tests
+## 7.2. Model Validation Tests
 
 Test **Model Validation Gate** đảm bảo model kém không được deploy:
 
@@ -109,7 +122,7 @@ class TestModelValidationGate:
 
 ---
 
-## 10.3. Model Hot-Reload Tests
+## 7.3. Model Hot-Reload Tests
 
 Test **ModelLoader** đảm bảo hot-reload hoạt động đúng và thread-safe:
 
@@ -184,7 +197,7 @@ class TestModelLoader:
 
 ---
 
-## 10.4. Prediction Cache Tests
+## 7.4. Prediction Cache Tests
 
 Test **PredictionCache** đảm bảo cache hit/miss/invalidation hoạt động đúng:
 
@@ -248,14 +261,14 @@ class TestPredictionCache:
 
 ---
 
-## 10.5. Integration Tests
+## 7.5. Integration Tests
 
-* **Train Raw → Bronze:** Gửi sample theo `data/train_raw/` contract, verify `event_time` được parse thành `source_event_time` và Parquet bronze được ghi đúng.
-* **Simulation Raw Isolation:** Verify `data/simulation_raw/2019-Nov.csv.gz` không bị baseline bronze stage đọc trực tiếp.
-* **Retrain Export Contract:** Verify database export cho retraining được materialize vào `data/retrain_raw/<window_id>/` trước khi qua bronze/silver/gold.
-* **Bronze → Silver:** Verify clean/null/outlier/sort logic tạo silver Parquet đúng và deterministic.
-* **Silver → Session Split:** Verify cùng một `user_session` chỉ nằm trong một split và split assignment không overlap.
-* **Silver → Gold:** Verify snapshot dataset sinh đúng features + label 10 phút tới theo split assignment.
+* **Raw Pool -> Bronze Dataset:** Gửi nhiều raw files tháng vào pipeline, verify `event_time` được parse thành `source_event_time` và output được materialize vào `data/bronze/` dưới dạng dataset directory.
+* **Bronze Dataset -> Silver Dataset:** Verify clean/null/invalid/sort logic tạo `data/silver/` đúng và deterministic khi input là bronze dataset nhiều partitions/files.
+* **Silver -> Session Split:** Verify session index được build toàn cục trên training window và cùng một `user_session` chỉ nằm trong một split.
+* **Cross-Month Session Split:** Verify session đi qua ranh giới tháng vẫn thuộc đúng một split duy nhất.
+* **Silver -> Gold:** Verify snapshot dataset sinh đúng features + label 10 phút tới theo split assignment.
+* **Window Isolation Contract:** Verify replay/demo artifacts không bị trộn với training artifacts.
 * **Kafka → Processor → Redis:** Gửi event vào Kafka, verify feature của đúng `user_session` được cập nhật đúng trong Redis.
 * **API → Redis → Model:** Gọi API theo `user_session`, verify response có đúng format, score hợp lệ, và có `prediction_time`.
 * **Predict Fallback Contract:** Khi Redis miss/model unavailable, `/predict` vẫn trả 200 với `prediction_mode="fallback"` và `fallback_reason` hợp lệ.
@@ -271,7 +284,7 @@ class TestPredictionCache:
 
 ---
 
-## 10.6. CI Pipeline (GitHub Actions)
+## 7.6. CI Pipeline (GitHub Actions)
 
 > Example target-state CI workflow; illustrative, không đảm bảo chạy ngay trong current repository state.
 

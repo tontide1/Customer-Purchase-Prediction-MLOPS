@@ -6,12 +6,22 @@ Hệ thống Phân tích & Dự đoán Ý định Mua hàng Thời gian thực
 
 ## ⚠️ Document Status
 
-**Trạng thái:** `TARGET ARCHITECTURE` (Kiến trúc mục tiêu)
+**Trạng thái:** `FREEZE-READY` ✅ (Blueprint/kiến trúc mục tiêu locked & verified)
+
+**Execution profile hiện tại (dev):** `DEV_SMOKE` ✅
+
+> **DEV_SMOKE** là profile chạy nhanh để tăng tốc vòng lặp phát triển, không thay đổi target-state contract của blueprint.
+>
+> - **Train window (dev):** `2019-10` -> `2019-10` (1 file tháng)
+> - **Replay window (dev):** `2020-03` -> `2020-03` (1 file tháng)
+> - **Mục đích:** smoke test pipeline, debug dữ liệu/feature nhanh, giảm thời gian chờ EDA/materialization
+> - **Lưu ý:** trước khi chốt đánh giá chất lượng model, phải quay lại full window theo blueprint (`training`: `2019-10` -> `2020-02`, `replay`: `2020-03` -> `2020-04`)
 
 > **Lưu ý quan trọng:** Blueprint này mô tả **kiến trúc và thiết kế mục tiêu** cho hệ thống. Hiện tại, repository chứa:
 > - ✅ Dataset gốc (`dataset/*.csv.gz`)
 > - ✅ Exploratory Analysis (`notebook/eda.ipynb`)
-> - ⏳ Services, training pipeline, monitoring, CI/CD: **chưa triển khai đầy đủ**
+> - ✅ **Week 1 Data Foundation:** Bronze/silver scripts, DVC pipeline scaffold (bronze/silver stages), schema contracts, basic tests
+> - ⏳ Serving API, full MLOps orchestration, monitoring, CI/CD, integrated testing: **trong trang thái triển khai**
 >
 > Mục đích của Blueprint này là hướng dẫn chi tiết để **hoàn thiện** hệ thống đầy đủ theo kiến trúc được mô tả.
 >
@@ -52,25 +62,27 @@ trong thời gian thực với độ trễ **< 1 giây**.
 - **Ingestion:** Apache Kafka + replay events giữ nguyên `source_event_time` + deterministic `event_id`
 - **Processing:** Quix Streams với session-scoped incremental state, deduplication, late-event handling
 - **Feature Store:** Redis (TTL 30 phút, exact counts via Set cho unique_products/categories)
-- **Data Versioning:** DVC quản lý artifacts `raw/bronze/silver/gold` + remote object storage S3-compatible (MinIO)
-- **Model:** Multi-Model (XGBoost, LightGBM, Random Forest) — best model auto-selected
-- **MLOps:** MLflow (versioning, lineage, validation gate, re-materialization cho retrain)
+- **Data Versioning & Artifacts:** DVC quản lý data artifacts (`raw/bronze/silver/gold` layers) + remote object storage S3-compatible (MinIO); training pipeline orchestrated qua dvc repro.
+- **Model Registry & Orchestration:** MLflow quản lý model registry, experiment metrics, validation gate, re-materialization trigger cho retrain; DVC & MLflow tách rõ ranh giới — MLflow không quản lý data, DVC không quản lý model registry.
 - **API:** FastAPI với session-scoped predict/explain, hot-reload + caching
 - **Monitoring:** Prometheus + Grafana (6 alert rules)
 
 ### Điểm nổi bật
 
-- **Train/Serve Alignment:** Offline training dùng snapshot theo thời điểm, cùng semantics với online inference
-- **Data Lake Layers:** `raw/bronze/silver/gold` tách bạch ingest, chuẩn hóa schema, clean, và snapshot training
-- **Reproducible Data Pipeline:** Mỗi artifact trong `raw/bronze/silver/gold` được version bằng DVC và push lên MinIO/S3 remote
-- **Training/Retraining Source of Truth:** Luôn đi qua data lake artifacts. PostgreSQL chỉ là operational store, retraining phải re-materialize qua pipeline.
-- **Exact Count Semantics:** Redis dùng Set thay vì HyperLogLog để đảm bảo train/serve parity chính xác cho unique_products, unique_categories
-- **Event Ordering Policy:** Deterministic `event_id`, deduplication, late-event handling, manual event metadata
-- **Multi-Model Experimentation:** Train & compare 3 models (XGBoost, LightGBM, Random Forest), auto-select best
-- **Closed-Loop MLOps:** Drift detection → Retrain (re-materialize) → Validation Gate → Hot-Reload
-- **Real-time Explainability:** SHAP values cho từng prediction
-- **Zero-Downtime:** Model hot-reload mỗi 5 phút
-- **One-Command Deploy:** Docker Compose
+- **Train/Serve Alignment:** Offline training dùng snapshot theo thời điểm, cùng semantics với online inference: tại snapshot time `t`, feature chỉ dùng các event đã xảy ra đến `t`.
+- **Serving & Evaluation Contracts:** `/predict` hỗ trợ graceful degradation khi model/feature-store unavailable; `/explain` trả HTTP 503 khi không khả dụng. Online evaluation tách rõ `demo_replay` (deterministic replay) vs `offline_backfill` (model-quality metric); không merge hai timeline.
+- **One Data Lake, Multiple Usage Windows:** Raw source pool gồm 7 file tháng; training, replay/demo, và retraining chỉ là các cách sử dụng khác nhau trên cùng data lake, không phải 3 pipeline dữ liệu độc lập.
+- **Data Lake Layers:** `raw/bronze/silver/gold` tách bạch ingest, chuẩn hóa schema, clean, session-aware split, và snapshot training.
+- **Official Split Policy:** Train/val/test split được xác định downstream từ silver layer theo `session_start_time` (UTC-normalized) và `user_session` boundary, không split theo snapshot rows hoặc hard-code theo file tháng.
+- **Training/Retraining Source of Truth:** Luôn đi qua data lake artifacts. PostgreSQL chỉ là operational store và nguồn export cho retraining trước khi re-materialize lại qua pipeline.
+- **Memory-Safe Materialization:** Bronze và silver artifacts có thể được materialize dưới dạng chunked/partitioned parquet datasets để xử lý dataset lớn mà không cần gom toàn bộ vào RAM; đây là implementation strategy, không đổi canonical split semantics theo session.
+- **Exact Count Semantics:** Redis dùng Set thay vì HyperLogLog để đảm bảo train/serve parity chính xác cho `unique_products`, `unique_categories`.
+- **Event Ordering Policy:** Deterministic `event_id`, deduplication, late-event handling, manual event metadata.
+- **Multi-Model Experimentation:** Train và compare 3 models (XGBoost, LightGBM, Random Forest), auto-select best.
+- **Closed-Loop MLOps:** Drift detection -> Retrain (re-materialize) -> Validation Gate -> Hot-Reload.
+- **Real-time Explainability:** SHAP values cho từng prediction.
+- **Zero-Downtime:** Model hot-reload mỗi 5 phút.
+- **One-Command Deploy:** Docker Compose.
 
 ---
 

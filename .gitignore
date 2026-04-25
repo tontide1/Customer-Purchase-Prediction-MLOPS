@@ -1,4 +1,6 @@
 # my ignore
+dataset/
+.opencode/
 data/**/*.csv.gz
 dataset/**/*.csv.gz
 

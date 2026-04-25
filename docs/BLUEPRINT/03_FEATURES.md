@@ -1,11 +1,16 @@
-# 5. Feature Engineering
+# 3. Feature Engineering
 
 > **← Xem [2. Architecture](02_ARCHITECTURE.md)**  
 > **→ Xem [4. Pipelines](04_PIPELINES.md)**
 
+> **Execution profile (local dev): `DEV_SMOKE`**
+> - Train window (dev): `2019-10` -> `2019-10`
+> - Replay window (dev): `2020-03` -> `2020-03`
+> - Profile này chỉ để tăng tốc vòng lặp phát triển; canonical target-state windows trong blueprint vẫn giữ nguyên.
+
 ---
 
-## 5.1. Offline Features (Training)
+## 3.1. Offline Features (Training)
 
 Training set được tạo dưới dạng **snapshot theo thời điểm** trên từng `user_session`, không phải 1 dòng tổng kết cho cả session đã kết thúc.
 
@@ -39,7 +44,7 @@ Các feature chính:
 
 ---
 
-## 5.2. Real-time Features (Inference)
+## 3.2. Real-time Features (Inference)
 
 Features được tính incrementally bởi Quix Streams, lưu vào Redis theo đúng entity `user_session`:
 

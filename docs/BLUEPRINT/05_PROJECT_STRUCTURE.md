@@ -1,9 +1,14 @@
-# 7. Cấu trúc Dự án (Project Structure)
+# 5. Cấu trúc Dự án (Project Structure)
 
 > **← Xem [4. Pipelines](04_PIPELINES.md)**  
 > **→ Xem [6. Error Handling](06_ERROR_HANDLING.md)**
 
-## 7.1. Repository Layout - TARGET STATE
+> **Execution profile (local dev): `DEV_SMOKE`**
+> - Train window (dev): `2019-10` -> `2019-10`
+> - Replay window (dev): `2020-03` -> `2020-03`
+> - Profile này chỉ để tăng tốc vòng lặp phát triển; canonical target-state windows trong blueprint vẫn giữ nguyên.
+
+## 5.1. Repository Layout - TARGET STATE
 
 Cấu trúc này mô tả **trạng thái hoàn chỉnh** của repository khi tất cả services, training, monitoring, CI/CD được triển khai đầy đủ:
 
@@ -67,8 +72,8 @@ REAL-TIME-ECOMMERCE-INTENT-SYSTEM/
 ├── training/                       # (TO-DO: hoàn thiện training pipeline)
 │   ├── src/
 │   │   ├── train.py                # Main training script
-│   │   ├── bronze.py               # Raw CSV -> bronze parquet
-│   │   ├── silver.py               # Bronze -> silver clean/sort parquet
+│   │   ├── bronze.py               # Raw pool -> bronze parquet dataset
+│   │   ├── silver.py               # Bronze dataset -> silver cleaned dataset
 │   │   ├── session_split.py        # Silver -> session-boundary split map
 │   │   ├── gold.py                 # Silver + split map -> gold snapshots
 │   │   ├── features.py             # Feature engineering logic
@@ -130,22 +135,37 @@ REAL-TIME-ECOMMERCE-INTENT-SYSTEM/
 ├── dataset/                        # (CURRENT STATE) Original datasets
 │   ├── 2019-Oct.csv.gz
 │   ├── 2019-Nov.csv.gz
-│   └── 2019-Dec.csv.gz
+│   ├── 2019-Dec.csv.gz
+│   ├── 2020-Jan.csv.gz
+│   ├── 2020-Feb.csv.gz
+│   ├── 2020-Mar.csv.gz
+│   └── 2020-Apr.csv.gz
 │
-└── data/                           # (PLANNED) Data lake directory (gitignored)
-    ├── train_raw/                  # Baseline training CSVs (2019-Oct)
-    │   └── .gitkeep
-    ├── simulation_raw/             # Online Simulation CSVs (2019-Nov)
-    │   └── .gitkeep
-    ├── retrain_raw/                # DB exports for retraining windows
-    │   └── .gitkeep
-    ├── bronze/                     # Parsed schema, event_time -> source_event_time
-    │   └── .gitkeep
-    ├── silver/                     # Cleaned, sorted parquet
-    │   └── .gitkeep
+└── data/                           # Data lake directory (gitignored)
+    ├── raw/                        # Raw source pool (copy/symlink/materialized from dataset/)
+    │   ├── 2019-Oct.csv.gz
+    │   ├── 2019-Nov.csv.gz
+    │   ├── 2019-Dec.csv.gz
+    │   ├── 2020-Jan.csv.gz
+    │   ├── 2020-Feb.csv.gz
+    │   ├── 2020-Mar.csv.gz
+    │   └── 2020-Apr.csv.gz
+    ├── bronze/                     # Parsed parquet dataset, memory-safe materialization
+    │   └── year=2019/
+    │       └── month=10/
+    │           └── part-000.parquet
+    ├── silver/                     # Cleaned parquet dataset for downstream session indexing
+    │   └── year=2019/
+    │       └── month=10/
+    │           └── part-000.parquet
     └── gold/                       # Snapshot training datasets + split artifacts
-        └── .gitkeep
+        ├── train_snapshots.parquet
+        ├── val_snapshots.parquet
+        ├── test_snapshots.parquet
+        └── session_split_map.parquet
 ```
+
+> **Lưu ý:** Partition tree bên trên chỉ là illustrative target-state. Có thể partition theo month, source file, hoặc grouped window; miễn là không đổi contract downstream theo `session_start_time` và `user_session`.
 
 ### Legend
 - ✅ **CURRENT STATE**: Thành phần hiện đã có trong repo
@@ -154,26 +174,24 @@ REAL-TIME-ECOMMERCE-INTENT-SYSTEM/
 
 ---
 
-## 7.2. Data Lake Paths - Tương ứng giữa Current và Target
+## 5.2. Data Lake Paths - Tương ứng giữa Current và Target
 
 | Purpose | Current Path | Target Path | Ghi chú |
 |---------|--------------|------------|---------|
-| **Baseline Training Input** | `dataset/2019-Oct.csv.gz` | `data/train_raw/` | Input của Week 1 `bronze` stage |
-| **Online Simulation Input** | `dataset/2019-Nov.csv.gz` | `data/simulation_raw/` | Source cho Data Replay; không train trực tiếp |
-| **Retraining Input** | PostgreSQL export từ replayed Nov events | `data/retrain_raw/<window_id>/` | Re-materialize qua bronze/silver/gold trước khi retrain |
+| **Raw Data Input** | `dataset/*.csv.gz` | `data/raw/` | `data/raw/` là raw source pool dùng cho training/replay/retraining materialization |
 | **Analysis & EDA** | `notebook/eda.ipynb` | `notebook/` hoặc `notebook-planned/` | Tái sử dụng insights từ EDA hiện có |
 | **Feature Experiments** | (không có) | `notebook-planned/02_feature_experiment.ipynb` | Cần tạo để experiment trước khi commit features |
 | **Model Experiments** | (không có) | `notebook-planned/03_model_experiment.ipynb` | So sánh XGBoost vs LightGBM vs Random Forest |
-| **Bronze Artifacts** | (không có) | `data/bronze/events.parquet` | Output của `training/src/bronze.py` |
-| **Silver Artifacts** | (không có) | `data/silver/events.parquet` | Output của `training/src/silver.py` |
+| **Bronze Artifacts** | (không có) | `data/bronze/` | Dataset directory cho parquet bronze, có thể partition theo file/tháng |
+| **Silver Artifacts** | (không có) | `data/silver/` | Dataset directory cho parquet silver, phục vụ session indexing |
 | **Gold Artifacts** | (không có) | `data/gold/train_snapshots.parquet` | Output của `training/src/gold.py` |
-| **Split Mapping** | (không có) | `data/gold/session_split_map.parquet` | Session boundary split assignment |
+| **Split Mapping** | (không có) | `data/gold/session_split_map.parquet` | Reproducibility artifact downstream; không phải source of truth cho session mới |
 
 ---
 
 ---
 
-# 8. Configuration Management
+# 6. Configuration Management
 
 > **← Xem [5. Project Structure](05_PROJECT_STRUCTURE.md)**  
 > **→ Xem [6. Error Handling](06_ERROR_HANDLING.md)**
@@ -226,13 +244,19 @@ from pydantic_settings import BaseSettings
 
 class TrainingSettings(BaseSettings):
     # Data Lake Paths
-    train_raw_data_path: str = "data/train_raw"
-    simulation_raw_data_path: str = "data/simulation_raw/2019-Nov.csv.gz"
-    retrain_raw_data_dir: str = "data/retrain_raw"
-    retrain_data_dir: str = "data/retrain"
-    bronze_data_path: str = "data/bronze/events.parquet"
-    silver_data_path: str = "data/silver/events.parquet"
+    raw_data_dir: str = "data/raw"
+    bronze_data_dir: str = "data/bronze"
+    silver_data_dir: str = "data/silver"
     gold_data_dir: str = "data/gold"
+
+    # Usage Windows
+    training_window_start: str = "2019-10-01T00:00:00Z"
+    training_window_end: str = "2020-02-29T23:59:59Z"
+    replay_window_start: str = "2020-03-01T00:00:00Z"
+    replay_window_end: str = "2020-04-30T23:59:59Z"
+
+    # Prediction Contract
+    prediction_horizon_minutes: int = 10
 
     # DVC + Object Storage (MinIO/S3-compatible)
     dvc_remote_name: str = "minio"
@@ -243,6 +267,15 @@ class TrainingSettings(BaseSettings):
 
     class Config:
         env_file = ".env"
+```
+
+DEV_SMOKE local override (khuyến nghị khi iterate nhanh):
+
+```env
+TRAINING_WINDOW_START=2019-10
+TRAINING_WINDOW_END=2019-10
+REPLAY_WINDOW_START=2020-03
+REPLAY_WINDOW_END=2020-03
 ```
 
 **File `.env.example`** được commit vào repo, file `.env` thực tế được **gitignored**.

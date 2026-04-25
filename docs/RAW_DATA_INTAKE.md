@@ -1,7 +1,7 @@
 # Raw Data Intake Rule
 
 ## Overview
-Raw CSVs are staged by role before they enter a pipeline. This avoids accidentally mixing baseline training data with Online Simulation data.
+The `data/raw/` layer is the entry point for the data pipeline. It serves as an immutable record of source data before any transformations.
 
 ## Source Data
 - **Location**: `dataset/*.csv.gz`
@@ -18,35 +18,31 @@ Raw CSVs are staged by role before they enter a pipeline. This avoids accidental
   - `user_session`: Session identifier (UUID-like string)
 
 ## Intake Process
-1. `dataset/2019-Oct.csv.gz` is staged into `data/train_raw/` for baseline training.
-2. `dataset/2019-Nov.csv.gz` is staged into `data/simulation_raw/` for Online Simulation/Data Replay.
-3. Database exports from replayed online events are staged into `data/retrain_raw/<window_id>/` for retraining.
-4. Files preserve original field names and values exactly (no transformations).
+1. Raw CSV files from `dataset/` are unpacked and staged into `data/raw/`
+2. Files preserve original field names and values exactly (no transformations)
+3. Bronze ingestion only considers files named `YYYY-Mon.csv` or `YYYY-Mon.csv.gz`; unsupported names are skipped
+4. Multiple CSV files can be ingested; selected files are read in chronological filename order
 
 ## Raw Layer Contract
-- **Baseline training**: `data/train_raw/2019-Oct.csv.gz`
-- **Online Simulation**: `data/simulation_raw/2019-Nov.csv.gz`
-- **Retraining**: `data/retrain_raw/<window_id>/events.csv.gz`, exported from PostgreSQL after Nov replay
-- **Immutability**: Records in raw staging directories are never modified
+- **Immutability**: Records in `data/raw/` are never modified
 - **Field Names**: Original source field names are preserved
 - **Timestamp Field**: Uses `event_time` (not `source_event_time`)
-- **No Filtering**: All records from source are kept (even invalid ones)
-- **Audit Trail**: Retraining data must trace back to database export window and DVC artifact revision
+- **No Row Filtering at Raw Layer**: Raw files are stored as-is; validation/filtering happens in bronze
+- **Windowed Ingestion**: Bronze selects files by `--window-profile` (training, replay, dev_smoke, or all)
+- **Audit Trail**: Source file and ingestion time can be tracked if needed in future iterations
 
 ## Downstream Transformation
 - **Bronze Layer** (`training/src/bronze.py`): 
   - Renames `event_time` → `source_event_time`
-  - Preserves `category_id` unchanged for downstream fallback logic
   - Validates `event_type` against allowed values
   - Rejects invalid records (logs count)
   - Writes to `data/bronze/events.parquet`
 
 ## Week 1 Scope
 For Week 1, we assume:
-- Baseline training raw data is present in `data/train_raw/`
-- The `bronze.py` script processes all files in `data/train_raw/`
-- Online Simulation source is staged separately in `data/simulation_raw/`
-- Retraining export directories are documented but not automated yet
+- A single raw input file (or multiple files) is present in `data/raw/`
+- The `bronze.py` script processes only files in the active raw window profile
+- The raw layer is populated manually or via a setup script (not automated yet)
 
 ## Future (Week 2+)
 - Streaming ingestion from message queue

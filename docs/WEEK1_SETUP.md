@@ -51,28 +51,25 @@ dvc remote modify minio-local endpointurl http://localhost:9000
 
 ### Step 4: Prepare Raw Data
 
-Baseline training expects CSV files in `data/train_raw/`.
+Raw data layer expects CSV files in `data/raw/` named `YYYY-Mon.csv` or `YYYY-Mon.csv.gz`.
 
-**Baseline training data**:
+**Option A: Copy sample data** (already done for testing):
 ```bash
-# 2019-Oct is the only baseline training input for Week 1
-mkdir -p data/train_raw
-cp dataset/2019-Oct.csv.gz data/train_raw/
-ls data/train_raw/
+# Sample file already created: data/raw/2019-Oct.csv.gz
+ls data/raw/
 ```
 
-**Online Simulation source**:
+**Option B: Add more raw data** (for full dataset):
 ```bash
-# 2019-Nov is reserved for Online Simulation/Data Replay
-mkdir -p data/simulation_raw
-cp dataset/2019-Nov.csv.gz data/simulation_raw/
+# Copy CSV files from dataset/ to data/raw/
+cp dataset/*.csv.gz data/raw/
 ```
 
 ### Step 5: Run Bronze Pipeline
 
 Transform raw CSV to bronze parquet:
 ```bash
-python3 training/src/bronze.py
+python3 training/src/bronze.py --window-profile dev_smoke
 ```
 
 Expected output:
@@ -130,11 +127,8 @@ python3 -m pytest training/tests/test_data_lake.py -v
 
 ```
 data/
-├── train_raw/              # Baseline training source
+├── raw/                    # Immutable source data
 │   └── 2019-Oct.csv.gz
-├── simulation_raw/         # Online Simulation source
-│   └── 2019-Nov.csv.gz
-├── retrain_raw/            # Future DB exports for retraining
 ├── bronze/                 # Validated, standardized
 │   └── events.parquet
 ├── silver/                 # Cleaned, deduplicated
@@ -162,14 +156,29 @@ shared/
 
 All paths and credentials are centralized in `training/src/config.py`:
 
-- **TRAIN_RAW_DATA_PATH**: `data/train_raw` (configurable via env var)
-- **SIMULATION_RAW_DATA_PATH**: `data/simulation_raw/2019-Nov.csv.gz`
-- **RETRAIN_RAW_DATA_DIR**: `data/retrain_raw`
-- **RETRAIN_DATA_DIR**: `data/retrain`
+- **RAW_DATA_PATH**: `data/raw` (configurable via env var)
 - **BRONZE_DATA_PATH**: `data/bronze/events.parquet`
 - **SILVER_DATA_PATH**: `data/silver/events.parquet`
 - **GOLD_DATA_DIR**: `data/gold` (for Week 2+)
 - **PREDICTION_HORIZON_MINUTES**: 10 (locked contract)
+- **DATA_WINDOW_PROFILE**: `dev_smoke` by default (`training`, `replay`, `dev_smoke`, or `all`)
+- **TRAINING_WINDOW_START/END**: `2019-10` -> `2020-02`
+- **DEV_SMOKE_WINDOW_START/END**: `2019-10` -> `2019-10`
+- **REPLAY_WINDOW_START/END**: `2020-03` -> `2020-04`
+
+### Replay Window
+
+If you want to materialize the replay/demo source window instead of training:
+```bash
+python3 training/src/bronze.py --window-profile replay
+```
+
+### Training Window
+
+To materialize the canonical training source window:
+```bash
+python3 training/src/bronze.py --window-profile training
+```
 
 ## Timestamp Contract
 
@@ -188,7 +197,7 @@ All paths and credentials are centralized in `training/src/config.py`:
 ### Silver Layer
 - ✓ Required fields (event_time/source_event_time, event_type, product_id, user_id, user_session) must not be null
 - ✓ price must be > 0 (or null for non-commerce events)
-- ✓ Records sorted by user_session + source_event_time
+- ✓ Records sorted by user_session + source_event_time + event_type + product_id + user_id
 
 ## Troubleshooting
 
