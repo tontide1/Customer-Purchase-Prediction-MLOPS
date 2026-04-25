@@ -12,11 +12,6 @@ Tests core transformations:
 import importlib
 import pytest
 import pandas as pd
-from pathlib import Path
-import sys
-
-# Add parent directory to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from shared import constants, schemas
 from training.src.bronze import (

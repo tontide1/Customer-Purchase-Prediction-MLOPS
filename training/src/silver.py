@@ -22,11 +22,6 @@ import pyarrow as pa
 import pyarrow.dataset as ds
 import pyarrow.parquet as pq
 
-# Add parent directory to path for imports
-import sys
-
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
 from shared import constants, schemas
 from training.src.config import Config
 

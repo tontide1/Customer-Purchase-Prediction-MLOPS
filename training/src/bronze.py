@@ -30,11 +30,6 @@ try:
 except ImportError:
     HAS_PSUTIL = False
 
-# Add parent directory to path for imports
-import sys
-
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
 from shared import constants, schemas
 from training.src.config import Config
 

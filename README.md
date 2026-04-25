@@ -58,11 +58,11 @@ dvc repro
 Equivalent direct commands:
 
 ```bash
-python training/src/bronze.py \
+python -m training.src.bronze \
   --input data/train_raw \
   --output data/bronze/events.parquet
 
-python training/src/silver.py \
+python -m training.src.silver \
   --input data/bronze/events.parquet \
   --output data/silver/events.parquet
 ```
