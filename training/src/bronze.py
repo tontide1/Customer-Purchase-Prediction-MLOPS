@@ -14,9 +14,10 @@ Memory-efficient: peak RAM ~O(chunksize) instead of O(total_data).
 import argparse
 import logging
 from pathlib import Path
-from typing import Generator, Tuple
+from typing import Generator, Optional, Tuple
 import time
 import gc
+import re
 
 import pandas as pd
 import pyarrow as pa
@@ -28,11 +29,6 @@ try:
     HAS_PSUTIL = True
 except ImportError:
     HAS_PSUTIL = False
-
-# Add parent directory to path for imports
-import sys
-
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from shared import constants, schemas
 from training.src.config import Config
@@ -65,6 +61,25 @@ BRONZE_STRING_COLUMNS = [
     "brand",
 ]
 
+RAW_FILE_MONTH_PATTERN = re.compile(
+    r"^(?P<year>\d{4})-(?P<month>[A-Za-z]{3})\.csv(?:\.gz)?$"
+)
+MONTH_ABBREVIATIONS = {
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
+}
+VALID_WINDOW_PROFILES = {"training", "dev_smoke", "replay", "all"}
+
 
 def get_current_memory_mb() -> float:
     """Get current process memory in MB. Returns 0 if psutil unavailable."""
@@ -87,9 +102,150 @@ def get_dataframe_memory_mb(df: pd.DataFrame) -> float:
         return 0.0
 
 
-def discover_raw_files(raw_dir: str) -> list:
+def parse_window_month(value: str) -> tuple[int, int]:
+    """Parse a YYYY-MM window bound into a comparable (year, month) tuple."""
+    try:
+        year_text, month_text = value.split("-", maxsplit=1)
+        year = int(year_text)
+        month = int(month_text)
+    except ValueError as exc:
+        raise ValueError(f"Invalid window month '{value}', expected YYYY-MM") from exc
+
+    if month < 1 or month > 12:
+        raise ValueError(f"Invalid window month '{value}', expected month 01-12")
+
+    return year, month
+
+
+def extract_raw_file_month(file_path: Path) -> Optional[tuple[int, int]]:
     """
-    Discover all CSV files in raw directory.
+    Extract month from supported raw filenames: YYYY-Mon.csv or YYYY-Mon.csv.gz.
+
+    Unsupported filenames return None so callers can skip manifests/notes.
+    """
+    match = RAW_FILE_MONTH_PATTERN.match(file_path.name)
+    if not match:
+        return None
+
+    month = MONTH_ABBREVIATIONS.get(match.group("month").lower())
+    if month is None:
+        return None
+
+    return int(match.group("year")), month
+
+
+def resolve_raw_window_bounds(
+    window_profile: Optional[str] = None,
+    window_start: Optional[str] = None,
+    window_end: Optional[str] = None,
+) -> tuple[Optional[tuple[int, int]], Optional[tuple[int, int]]]:
+    """
+    Resolve profile/custom window bounds into inclusive month tuples.
+
+    Custom bounds override the profile only when both start and end are provided.
+    The all profile without custom bounds selects every supported raw file.
+    """
+    if bool(window_start) != bool(window_end):
+        raise ValueError("Both window_start and window_end must be provided together")
+
+    if window_start and window_end:
+        start_month = parse_window_month(window_start)
+        end_month = parse_window_month(window_end)
+        if start_month > end_month:
+            raise ValueError(
+                f"window_start must be <= window_end: {window_start} > {window_end}"
+            )
+        return start_month, end_month
+
+    profile = (window_profile or Config.DATA_WINDOW_PROFILE).lower()
+    if profile not in VALID_WINDOW_PROFILES:
+        raise ValueError(
+            f"Invalid window_profile '{profile}'. "
+            f"Expected one of: {', '.join(sorted(VALID_WINDOW_PROFILES))}"
+        )
+
+    if profile == "all":
+        return None, None
+
+    if profile == "training":
+        start_value = Config.TRAINING_WINDOW_START
+        end_value = Config.TRAINING_WINDOW_END
+    elif profile == "dev_smoke":
+        start_value = Config.DEV_SMOKE_WINDOW_START
+        end_value = Config.DEV_SMOKE_WINDOW_END
+    else:
+        start_value = Config.REPLAY_WINDOW_START
+        end_value = Config.REPLAY_WINDOW_END
+
+    start_month = parse_window_month(start_value)
+    end_month = parse_window_month(end_value)
+    if start_month > end_month:
+        raise ValueError(f"Invalid {profile} window: {start_value} > {end_value}")
+
+    return start_month, end_month
+
+
+def select_raw_files(
+    raw_dir: str,
+    window_profile: Optional[str] = None,
+    window_start: Optional[str] = None,
+    window_end: Optional[str] = None,
+) -> list[Path]:
+    """
+    Select supported raw CSV files for a profile/custom inclusive month window.
+    """
+    raw_path = Path(raw_dir)
+
+    if not raw_path.exists():
+        raise FileNotFoundError(f"Raw data directory not found: {raw_dir}")
+
+    start_month, end_month = resolve_raw_window_bounds(
+        window_profile=window_profile,
+        window_start=window_start,
+        window_end=window_end,
+    )
+
+    candidates = list(raw_path.glob("*.csv")) + list(raw_path.glob("*.csv.gz"))
+    selected_with_month: list[tuple[tuple[int, int], Path]] = []
+
+    for file_path in candidates:
+        file_month = extract_raw_file_month(file_path)
+        if file_month is None:
+            logger.info(f"Skipping unsupported raw filename: {file_path.name}")
+            continue
+
+        if start_month is not None and file_month < start_month:
+            continue
+        if end_month is not None and file_month > end_month:
+            continue
+
+        selected_with_month.append((file_month, file_path))
+
+    selected = [
+        path
+        for _, path in sorted(
+            selected_with_month, key=lambda item: (item[0], item[1].name)
+        )
+    ]
+
+    if not selected:
+        profile = window_profile or Config.DATA_WINDOW_PROFILE
+        raise FileNotFoundError(
+            f"No supported raw CSV files found in {raw_dir} for profile/window "
+            f"{profile}"
+        )
+
+    return selected
+
+
+def discover_raw_files(
+    raw_dir: str,
+    window_profile: Optional[str] = None,
+    window_start: Optional[str] = None,
+    window_end: Optional[str] = None,
+) -> list[Path]:
+    """
+    Discover supported raw CSV files in raw directory for the selected window.
 
     Args:
         raw_dir: Path to raw data directory
@@ -97,18 +253,12 @@ def discover_raw_files(raw_dir: str) -> list:
     Returns:
         Sorted list of Path objects for .csv and .csv.gz files
     """
-    raw_path = Path(raw_dir)
-
-    if not raw_path.exists():
-        raise FileNotFoundError(f"Raw data directory not found: {raw_dir}")
-
-    csv_files = list(raw_path.glob("*.csv"))
-    gz_files = list(raw_path.glob("*.csv.gz"))
-
-    all_files = sorted(csv_files + gz_files)
-
-    if not all_files:
-        raise FileNotFoundError(f"No CSV files found in {raw_dir}")
+    all_files = select_raw_files(
+        raw_dir,
+        window_profile=window_profile,
+        window_start=window_start,
+        window_end=window_end,
+    )
 
     logger.info(f"Discovered {len(all_files)} raw file(s) to process")
     for f in all_files:
@@ -134,13 +284,16 @@ def ensure_not_simulation_raw_input(raw_dir: str) -> None:
         or simulation_dir in input_path.parents
     ):
         raise ValueError(
-            "Bronze baseline input must not read from simulation raw data: "
-            f"{raw_dir}"
+            f"Bronze baseline input must not read from simulation raw data: {raw_dir}"
         )
 
 
 def read_raw_chunks(
-    raw_dir: str, chunksize: int = 200000
+    raw_dir: str,
+    chunksize: int = 200000,
+    window_profile: Optional[str] = None,
+    window_start: Optional[str] = None,
+    window_end: Optional[str] = None,
 ) -> Generator[Tuple[Path, pd.DataFrame], None, None]:
     """
     Generator: yield chunks from each raw CSV file.
@@ -155,7 +308,12 @@ def read_raw_chunks(
         (file_path, chunk_df) tuples
     """
     ensure_not_simulation_raw_input(raw_dir)
-    all_files = discover_raw_files(raw_dir)
+    all_files = discover_raw_files(
+        raw_dir,
+        window_profile=window_profile,
+        window_start=window_start,
+        window_end=window_end,
+    )
 
     for file_path in all_files:
         logger.info(f"\nProcessing {file_path.name}...")
@@ -286,6 +444,9 @@ def write_bronze_parquet_chunked(
     output_path: str,
     chunksize: int = 200000,
     memory_log: bool = True,
+    window_profile: Optional[str] = None,
+    window_start: Optional[str] = None,
+    window_end: Optional[str] = None,
 ) -> dict:
     """
     Write bronze artifact from raw CSVs using chunked streaming + ParquetWriter.
@@ -313,7 +474,13 @@ def write_bronze_parquet_chunked(
     start_memory_mb = get_current_memory_mb()
 
     try:
-        for file_path, chunk in read_raw_chunks(raw_dir, chunksize=chunksize):
+        for file_path, chunk in read_raw_chunks(
+            raw_dir,
+            chunksize=chunksize,
+            window_profile=window_profile,
+            window_start=window_start,
+            window_end=window_end,
+        ):
             chunk_count += 1
             rows_in_chunk = len(chunk)
             total_rows_in += rows_in_chunk
@@ -439,6 +606,23 @@ def main():
         help="Number of rows per chunk (default: 200000). Lower for tight RAM, higher for speed.",
     )
     parser.add_argument(
+        "--window-profile",
+        choices=sorted(VALID_WINDOW_PROFILES),
+        default=Config.DATA_WINDOW_PROFILE,
+        help=(
+            "Raw data usage window to materialize "
+            f"(default: {Config.DATA_WINDOW_PROFILE})"
+        ),
+    )
+    parser.add_argument(
+        "--window-start",
+        help="Optional custom inclusive window start month in YYYY-MM format",
+    )
+    parser.add_argument(
+        "--window-end",
+        help="Optional custom inclusive window end month in YYYY-MM format",
+    )
+    parser.add_argument(
         "--memory-log",
         action="store_true",
         default=True,
@@ -458,6 +642,9 @@ def main():
     logger.info("=" * 70)
     logger.info(f"Input directory: {args.input}")
     logger.info(f"Output file:     {args.output}")
+    logger.info(f"Window profile:  {args.window_profile}")
+    if args.window_start or args.window_end:
+        logger.info(f"Custom window:   {args.window_start} -> {args.window_end}")
     logger.info(f"Chunksize:       {args.chunksize:,} rows")
     logger.info(f"Memory telemetry: {'enabled' if args.memory_log else 'disabled'}")
     if not HAS_PSUTIL and args.memory_log:
@@ -468,12 +655,15 @@ def main():
 
     try:
         # Run chunked pipeline
-        logger.info(f"\n1. Reading and transforming raw data in chunks...")
+        logger.info("\n1. Reading and transforming raw data in chunks...")
         stats = write_bronze_parquet_chunked(
             args.input,
             args.output,
             chunksize=args.chunksize,
             memory_log=args.memory_log,
+            window_profile=args.window_profile,
+            window_start=args.window_start,
+            window_end=args.window_end,
         )
 
         # Summary

@@ -1,7 +1,7 @@
 schema: '2.0'
 stages:
   bronze:
-    cmd: python training/src/bronze.py --input data/train_raw --output 
+    cmd: python -m training.src.bronze --input data/train_raw --output
       data/bronze/events.parquet
     deps:
     - path: data/train_raw
@@ -35,7 +35,7 @@ stages:
       md5: 4755b5563f0380cce8d677f2d515a073
       size: 1187246639
   silver:
-    cmd: python training/src/silver.py --input data/bronze/events.parquet 
+    cmd: python -m training.src.silver --input data/bronze/events.parquet
       --output data/silver/events.parquet
     deps:
     - path: data/bronze/events.parquet

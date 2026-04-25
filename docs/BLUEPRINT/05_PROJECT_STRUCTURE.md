@@ -1,12 +1,12 @@
 # 5. Cấu trúc Dự án (Project Structure)
 
-> **← Xem [4. Pipelines](04_PIPELINES.md)**  
+> **← Xem [4. Pipelines](04_PIPELINES.md)**
 > **→ Xem [6. Error Handling](06_ERROR_HANDLING.md)**
 
 > **Execution profile (local dev): `DEV_SMOKE`**
 > - Train window (dev): `2019-10` -> `2019-10`
-> - Replay window (dev): `2020-03` -> `2020-03`
-> - Profile này chỉ để tăng tốc vòng lặp phát triển; canonical target-state windows trong blueprint vẫn giữ nguyên.
+> - Replay window (dev): `2019-11` -> `2019-11`
+> - Project contract hiện tại: `2019-Oct.csv.gz` cho baseline training, `2019-Nov.csv.gz` cho replay.
 
 ## 5.1. Repository Layout - TARGET STATE
 
@@ -193,7 +193,7 @@ REAL-TIME-ECOMMERCE-INTENT-SYSTEM/
 
 # 6. Configuration Management
 
-> **← Xem [5. Project Structure](05_PROJECT_STRUCTURE.md)**  
+> **← Xem [5. Project Structure](05_PROJECT_STRUCTURE.md)**
 > **→ Xem [6. Error Handling](06_ERROR_HANDLING.md)**
 
 Tất cả config được quản lý qua **environment variables**, load bằng **pydantic-settings**.
@@ -251,9 +251,9 @@ class TrainingSettings(BaseSettings):
 
     # Usage Windows
     training_window_start: str = "2019-10-01T00:00:00Z"
-    training_window_end: str = "2020-02-29T23:59:59Z"
-    replay_window_start: str = "2020-03-01T00:00:00Z"
-    replay_window_end: str = "2020-04-30T23:59:59Z"
+    training_window_end: str = "2019-10-31T23:59:59Z"
+    replay_window_start: str = "2019-11-01T00:00:00Z"
+    replay_window_end: str = "2019-11-30T23:59:59Z"
 
     # Prediction Contract
     prediction_horizon_minutes: int = 10
@@ -274,8 +274,8 @@ DEV_SMOKE local override (khuyến nghị khi iterate nhanh):
 ```env
 TRAINING_WINDOW_START=2019-10
 TRAINING_WINDOW_END=2019-10
-REPLAY_WINDOW_START=2020-03
-REPLAY_WINDOW_END=2020-03
+REPLAY_WINDOW_START=2019-11
+REPLAY_WINDOW_END=2019-11
 ```
 
 **File `.env.example`** được commit vào repo, file `.env` thực tế được **gitignored**.

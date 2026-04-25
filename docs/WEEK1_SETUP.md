@@ -55,21 +55,24 @@ Raw data layer expects CSV files in `data/raw/` named `YYYY-Mon.csv` or `YYYY-Mo
 
 **Option A: Copy sample data** (already done for testing):
 ```bash
-# Sample file already created: data/raw/2019-Oct.csv.gz
-ls data/raw/
+# Baseline training file: data/train_raw/2019-Oct.csv.gz
+ls data/train_raw/
 ```
 
 **Option B: Add more raw data** (for full dataset):
 ```bash
-# Copy CSV files from dataset/ to data/raw/
-cp dataset/*.csv.gz data/raw/
+# Copy only the baseline training file into data/train_raw/
+cp dataset/2019-Oct.csv.gz data/train_raw/
+
+# Replay source is kept separate for Online Simulation
+cp dataset/2019-Nov.csv.gz data/simulation_raw/
 ```
 
 ### Step 5: Run Bronze Pipeline
 
 Transform raw CSV to bronze parquet:
 ```bash
-python3 training/src/bronze.py --window-profile dev_smoke
+python3 training/src/bronze.py --input data/train_raw --window-profile training
 ```
 
 Expected output:
@@ -127,8 +130,11 @@ python3 -m pytest training/tests/test_data_lake.py -v
 
 ```
 data/
-├── raw/                    # Immutable source data
+├── train_raw/              # Baseline training source
 │   └── 2019-Oct.csv.gz
+├── simulation_raw/         # Online Simulation / replay source
+│   └── 2019-Nov.csv.gz
+├── retrain_raw/            # DB exports for retraining after 7 days
 ├── bronze/                 # Validated, standardized
 │   └── events.parquet
 ├── silver/                 # Cleaned, deduplicated
@@ -156,22 +162,27 @@ shared/
 
 All paths and credentials are centralized in `training/src/config.py`:
 
-- **RAW_DATA_PATH**: `data/raw` (configurable via env var)
+- **TRAIN_RAW_DATA_PATH**: `data/train_raw` (baseline training source)
+- **SIMULATION_RAW_DATA_PATH**: `data/simulation_raw/2019-Nov.csv.gz` (replay source)
+- **RETRAIN_RAW_DATA_DIR**: `data/retrain_raw` (DB exports for retraining)
+- **RETRAIN_WINDOW_DAYS**: 7
 - **BRONZE_DATA_PATH**: `data/bronze/events.parquet`
 - **SILVER_DATA_PATH**: `data/silver/events.parquet`
 - **GOLD_DATA_DIR**: `data/gold` (for Week 2+)
 - **PREDICTION_HORIZON_MINUTES**: 10 (locked contract)
-- **DATA_WINDOW_PROFILE**: `dev_smoke` by default (`training`, `replay`, `dev_smoke`, or `all`)
-- **TRAINING_WINDOW_START/END**: `2019-10` -> `2020-02`
+- **DATA_WINDOW_PROFILE**: `training` by default (`training`, `replay`, `dev_smoke`, or `all`)
+- **TRAINING_WINDOW_START/END**: `2019-10` -> `2019-10`
 - **DEV_SMOKE_WINDOW_START/END**: `2019-10` -> `2019-10`
-- **REPLAY_WINDOW_START/END**: `2020-03` -> `2020-04`
+- **REPLAY_WINDOW_START/END**: `2019-11` -> `2019-11`
 
 ### Replay Window
 
 If you want to materialize the replay/demo source window instead of training:
 ```bash
-python3 training/src/bronze.py --window-profile replay
+python3 training/src/bronze.py --input data/raw --window-profile replay
 ```
+
+The Week 1 baseline pipeline must not train directly from `data/simulation_raw/2019-Nov.csv.gz`. Replay events are persisted operationally and exported to `data/retrain_raw/` before retraining after 7 days.
 
 ### Training Window
 

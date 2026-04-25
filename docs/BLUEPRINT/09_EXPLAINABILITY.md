@@ -1,11 +1,11 @@
 # 9. Model Explainability
 
-> **← Xem [8. Security](08_SECURITY.md)**  
+> **← Xem [8. Security](08_SECURITY.md)**
 > **→ Xem [10. Performance](10_PERFORMANCE.md)**
 
 > **Execution profile (local dev): `DEV_SMOKE`**
 > - Train window (dev): `2019-10` -> `2019-10`
-> - Replay window (dev): `2020-03` -> `2020-03`
+> - Replay window (dev): `2019-11` -> `2019-11`
 > - Profile này chỉ để tăng tốc vòng lặp phát triển; canonical target-state windows trong blueprint vẫn giữ nguyên.
 
 ---

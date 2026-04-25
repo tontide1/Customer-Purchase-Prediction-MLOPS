@@ -120,7 +120,7 @@ stages:
   bronze:
     deps: [training/src/bronze.py, shared/*, data/train_raw]
     outs: [data/bronze/events.parquet]
-  
+
   silver:
     deps: [training/src/silver.py, shared/*, data/bronze/events.parquet]
     outs: [data/silver/events.parquet]

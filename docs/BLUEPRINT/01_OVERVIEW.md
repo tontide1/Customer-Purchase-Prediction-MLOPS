@@ -1,12 +1,12 @@
 # 1. Tổng quan (Overview)
 
-> **← Xem [BLUEPRINT.md gốc](../../BLUEPRINT.md)**  
+> **← Xem [BLUEPRINT.md gốc](../../BLUEPRINT.md)**
 > **→ Xem [2. Architecture](02_ARCHITECTURE.md)**
 
 > **Execution profile (local dev): `DEV_SMOKE`**
 > - Train window (dev): `2019-10` -> `2019-10`
-> - Replay window (dev): `2020-03` -> `2020-03`
-> - Profile này chỉ để tăng tốc vòng lặp phát triển; canonical target-state windows trong blueprint vẫn giữ nguyên.
+> - Replay window (dev): `2019-11` -> `2019-11`
+> - Project contract hiện tại: `2019-Oct.csv.gz` cho baseline training, `2019-Nov.csv.gz` cho replay.
 
 ---
 
@@ -31,12 +31,12 @@ trong thời gian thực với độ trễ **< 1 giây**.
 
 # 2. Dữ liệu (Data Strategy)
 
-> **← Xem [1. Overview](01_OVERVIEW.md)**  
+> **← Xem [1. Overview](01_OVERVIEW.md)**
 > **→ Xem [2. Architecture](02_ARCHITECTURE.md)**
 
 ## 2.1. Nguồn dữ liệu
 
-* **Raw source pool:** Dataset hiện gồm 7 file tháng từ `2019-10` đến `2020-04`, đang lưu ở `dataset/*.csv.gz` và có thể được materialize vào `data/raw/` để chạy pipeline.
+* **Raw source pool:** Dataset gốc có nhiều file tháng, nhưng project contract hiện tại chỉ dùng `2019-Oct.csv.gz` cho baseline training và `2019-Nov.csv.gz` cho Online Simulation / replay.
 * Các file tháng trong raw source pool chỉ là đơn vị lưu trữ/ingestion của nguồn dữ liệu, không phải boundary logic cho split train/val/test.
 * **Các trường quan trọng:** `event_time`, `event_type`, `product_id`, `category_id`, `category_code`, `brand`, `price`, `user_id`, `user_session`.
 * **Quy ước timestamp trong hệ thống:** `event_time` từ Kaggle được preserve thành `source_event_time`; simulator thêm `replay_time`; FastAPI thêm `prediction_time` trong response.
@@ -60,8 +60,8 @@ Toàn bộ 7 file tháng được xem là **một raw source pool chung** trong 
 
 ### Offline Training
 
-* **Training window:** Chọn dữ liệu trong khoảng `2019-10` -> `2020-02`.
-* **DEV_SMOKE override (local dev):** dùng `2019-10` -> `2019-10` để chạy nhanh.
+* **Training window:** Chọn dữ liệu trong khoảng `2019-10` -> `2019-10` (`2019-Oct.csv.gz`).
+* **DEV_SMOKE override (local dev):** cũng dùng `2019-10` -> `2019-10` để chạy nhanh.
 * **Input chuẩn:** Dùng `data/silver/` để build session index và split assignment, sau đó materialize `data/gold/`.
 * **Đơn vị mẫu huấn luyện:** Không phải một dòng cho cả session đã kết thúc, mà là nhiều **snapshot rows** trên cùng `user_session`.
 * **Quy tắc snapshot:** Tại mỗi thời điểm `t`, feature chỉ được tính từ các event có `source_event_time <= t`.
@@ -71,15 +71,14 @@ Toàn bộ 7 file tháng được xem là **một raw source pool chung** trong 
 
 ### Online Replay / Demo
 
-* **Replay window:** Chọn dữ liệu trong khoảng `2020-03` -> `2020-04`.
-* **DEV_SMOKE override (local dev):** dùng `2020-03` -> `2020-03` để chạy nhanh.
-* **Nguồn replay:** Đọc từ raw source pool trong `data/raw/`.
+* **Replay window:** Chọn dữ liệu trong khoảng `2019-11` -> `2019-11` (`2019-Nov.csv.gz`).
+* **Nguồn replay:** Đọc từ replay/simulation raw source, giữ tách biệt với baseline training source.
 * **Kỹ thuật:** Script replay đọc event, preserve `source_event_time`, gắn thêm `replay_time`, rồi gửi vào hệ thống theo thời gian thực.
 * **Mục đích:** Mô phỏng behavior online thực tế mà không phá vỡ source timeline semantics của dữ liệu gốc.
 
 ### Retraining
 
-* **Nguồn input:** Export events mới từ PostgreSQL theo một retraining window vận hành.
+* **Nguồn input:** Export events replay đã lưu từ PostgreSQL theo retraining window 7 ngày.
 * **Yêu cầu bắt buộc:** Dữ liệu export phải được re-materialize lại qua `raw -> bronze -> silver -> gold` trước khi train.
 * **Lý do:** Giữ reproducibility, lineage, và cùng semantics với offline training pipeline.
 
@@ -105,7 +104,7 @@ Trước khi đưa vào pipeline, dữ liệu được validate bằng **Pydanti
 | PostgreSQL | **Chỉ** operational store, audit log, và monitoring. Dùng để thu thập events gần đây cho retraining **nhưng phải qua bước re-materialize** trước khi train. |
 
 **Retraining flow:**
-1. Export events mới từ PostgreSQL (7-14 ngày gần nhất)
+1. Export events mới từ PostgreSQL (7 ngày gần nhất)
 2. **Materialize** dữ liệu đó qua `bronze -> silver -> gold` pipeline với lineage metadata
 3. Với artifacts đã định nghĩa trong `dvc.yaml`: chạy `dvc repro` rồi `dvc push` để persist artifacts lên MinIO remote
 4. Chỉ dùng `dvc add` cho artifacts ngoài pipeline definition (ad-hoc outputs)
