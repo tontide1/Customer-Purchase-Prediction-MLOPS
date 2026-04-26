@@ -42,7 +42,12 @@ declared in `pyproject.toml`.
 
 ## Quick Start
 
-Stage the raw dataset before running anything:
+Stage the raw dataset before running anything. Week 1 expects the public Kaggle
+eCommerce events datasets by `mkechinov` — schema-compatible options include
+[eCommerce behavior data from multi category store](https://www.kaggle.com/datasets/mkechinov/ecommerce-behavior-data-from-multi-category-store)
+and [eCommerce events history in cosmetics shop](https://www.kaggle.com/datasets/mkechinov/ecommerce-events-history-in-cosmetics-shop).
+Download `2019-Oct.csv.gz` (training) and `2019-Nov.csv.gz` (replay) from one
+of those and place them as shown:
 
 ```bash
 mkdir -p data/train_raw data/simulation_raw
