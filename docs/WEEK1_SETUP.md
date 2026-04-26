@@ -2,10 +2,13 @@
 
 ## Prerequisites
 
-1. **Python 3.8+** with the following packages:
+1. **Python 3.11–3.12** with the project installed in editable mode:
    ```bash
-   pip install pandas pyarrow dvc python-dotenv
+   python -m pip install -e ".[dev]"
    ```
+
+   Runtime and dev dependencies are declared in `pyproject.toml`. See `README.md`
+   for the canonical quick-start.
 
 2. **Docker & Docker Compose** for MinIO bootstrap
 
