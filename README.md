@@ -42,6 +42,23 @@ declared in `pyproject.toml`.
 
 ## Quick Start
 
+Stage the raw dataset before running anything. Week 1 expects the public Kaggle
+eCommerce events datasets by `mkechinov` — schema-compatible options include
+[eCommerce behavior data from multi category store](https://www.kaggle.com/datasets/mkechinov/ecommerce-behavior-data-from-multi-category-store)
+and [eCommerce events history in cosmetics shop](https://www.kaggle.com/datasets/mkechinov/ecommerce-events-history-in-cosmetics-shop).
+Download `2019-Oct.csv.gz` (training) and `2019-Nov.csv.gz` (replay) from one
+of those and place them as shown:
+
+```bash
+mkdir -p data/train_raw data/simulation_raw
+# Place 2019-Oct.csv.gz under data/train_raw (baseline training source)
+# Place 2019-Nov.csv.gz under data/simulation_raw (online replay source)
+```
+
+The bronze pipeline defaults to the `training` window profile and only reads
+`data/train_raw`. The replay file in `data/simulation_raw` is intentionally
+not ingested by the baseline pipeline.
+
 Start local object storage:
 
 ```bash
