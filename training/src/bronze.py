@@ -2,7 +2,7 @@
 Bronze layer pipeline: Raw CSV → Bronze Parquet (chunked streaming).
 
 Transforms raw event data from CSV to standardized Parquet format.
-- Reads files in chunks to minimize memory footprint
+- Reads files in batches via Polars scan_csv → collect_batches (bounded memory)
 - Renames event_time → source_event_time
 - Validates event_type
 - Rejects invalid records
@@ -12,14 +12,14 @@ Memory-efficient: peak RAM ~O(chunksize) instead of O(total_data).
 """
 
 import argparse
+import gc
 import logging
+import re
+import time
 from pathlib import Path
 from typing import Generator, Optional, Tuple
-import time
-import gc
-import re
 
-import pandas as pd
+import polars as pl
 import pyarrow as pa
 import pyarrow.parquet as pq
 
@@ -33,22 +33,22 @@ except ImportError:
 from shared import constants, schemas
 from training.src.config import Config
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-
-RAW_CSV_DTYPES = {
-    "event_type": "string",
-    "product_id": "string",
-    constants.FIELD_CATEGORY_ID: "string",
-    "user_id": "string",
-    "user_session": "string",
-    "category_code": "string",
-    "brand": "string",
+_RAW_CSV_SCHEMA_OVERRIDES: dict[str, pl.DataType] = {
+    "event_time": pl.Utf8,
+    "event_type": pl.Utf8,
+    "product_id": pl.Utf8,
+    constants.FIELD_CATEGORY_ID: pl.Utf8,
+    "category_code": pl.Utf8,
+    "brand": pl.Utf8,
+    "user_id": pl.Utf8,
+    "user_session": pl.Utf8,
+    "price": pl.Float64,
 }
 
 BRONZE_STRING_COLUMNS = [
@@ -80,6 +80,22 @@ MONTH_ABBREVIATIONS = {
 }
 VALID_WINDOW_PROFILES = {"training", "dev_smoke", "replay", "all"}
 
+_BRONZE_FIELD_ORDER = [field.name for field in schemas.BRONZE_SCHEMA]
+
+
+def finalize_bronze_polars_dtypes(df: pl.DataFrame) -> pl.DataFrame:
+    """Cast columns to dtypes compatible with BRONZE_SCHEMA ordering."""
+    str_casts = [
+        pl.col(column).cast(pl.Utf8, strict=False)
+        for column in BRONZE_STRING_COLUMNS
+        if column in df.columns
+    ]
+    return df.with_columns(
+        *str_casts,
+        pl.col("price").cast(pl.Float64, strict=False),
+        pl.col(constants.FIELD_SOURCE_EVENT_TIME).cast(pl.Datetime("us")),
+    ).select(_BRONZE_FIELD_ORDER)
+
 
 def get_current_memory_mb() -> float:
     """Get current process memory in MB. Returns 0 if psutil unavailable."""
@@ -92,14 +108,26 @@ def get_current_memory_mb() -> float:
         return 0.0
 
 
-def get_dataframe_memory_mb(df: pd.DataFrame) -> float:
-    """Get DataFrame memory in MB (deep count)."""
-    if df.empty:
+def get_polars_estimated_mb(df: pl.DataFrame) -> float:
+    """Best-effort DataFrame footprint in MB (Polars estimator)."""
+    if df.height == 0:
         return 0.0
     try:
-        return df.memory_usage(deep=True).sum() / (1024 * 1024)
+        return float(df.estimated_size(unit="mb"))
     except Exception:
         return 0.0
+
+
+def bronze_polars_to_arrow_table(chunk: pl.DataFrame) -> pa.Table:
+    """Cast a bronze Polars frame to BRONZE_SCHEMA for Parquet writes."""
+    t = chunk.select(_BRONZE_FIELD_ORDER).to_arrow()
+    arrays: list[pa.Array] = []
+    for field in schemas.BRONZE_SCHEMA:
+        col = t.column(field.name).combine_chunks()
+        if col.type != field.type:
+            col = col.cast(field.type, safe=False)
+        arrays.append(col)
+    return pa.Table.from_arrays(arrays, schema=schemas.BRONZE_SCHEMA)
 
 
 def parse_window_month(value: str) -> tuple[int, int]:
@@ -294,7 +322,7 @@ def read_raw_chunks(
     window_profile: Optional[str] = None,
     window_start: Optional[str] = None,
     window_end: Optional[str] = None,
-) -> Generator[Tuple[Path, pd.DataFrame], None, None]:
+) -> Generator[Tuple[Path, pl.DataFrame], None, None]:
     """
     Generator: yield chunks from each raw CSV file.
 
@@ -319,25 +347,17 @@ def read_raw_chunks(
         logger.info(f"\nProcessing {file_path.name}...")
 
         try:
-            if str(file_path).endswith(".gz"):
-                reader = pd.read_csv(
-                    file_path,
-                    compression="gzip",
-                    dtype=RAW_CSV_DTYPES,
-                    chunksize=chunksize,
-                )
-            else:
-                reader = pd.read_csv(
-                    file_path,
-                    dtype=RAW_CSV_DTYPES,
-                    chunksize=chunksize,
-                )
-
-            for chunk_idx, chunk in enumerate(reader, start=1):
+            lf = pl.scan_csv(
+                str(file_path),
+                schema_overrides=_RAW_CSV_SCHEMA_OVERRIDES,
+            )
+            chunk_idx = 0
+            for chunk in lf.collect_batches(chunk_size=chunksize):
+                chunk_idx += 1
                 logger.debug(
-                    f"  Chunk {chunk_idx}: {len(chunk)} rows | "
+                    f"  Chunk {chunk_idx}: {chunk.height} rows | "
                     f"RAM: {get_current_memory_mb():.1f} MB | "
-                    f"DF: {get_dataframe_memory_mb(chunk):.1f} MB"
+                    f"DF: {get_polars_estimated_mb(chunk):.1f} MB"
                 )
                 yield file_path, chunk
 
@@ -346,26 +366,25 @@ def read_raw_chunks(
             raise
 
 
-def parse_event_time_chunk(df: pd.DataFrame) -> pd.DataFrame:
+def parse_event_time_chunk(df: pl.DataFrame) -> pl.DataFrame:
     """
-    Parse event_time string to timestamp in-place on chunk.
+    Parse event_time string to timestamp on chunk.
 
     Input format: "2019-10-01 00:00:00 UTC"
-
-    Args:
-        df: Input DataFrame with event_time column (modified in-place)
-
-    Returns:
-        DataFrame with parsed event_time as timestamp
     """
-    # Remove ' UTC' suffix if present, then parse
-    df[constants.FIELD_EVENT_TIME] = pd.to_datetime(
-        df[constants.FIELD_EVENT_TIME].str.replace(" UTC", "")
+    return df.with_columns(
+        pl.col(constants.FIELD_EVENT_TIME)
+        .str.replace(" UTC", "")
+        .str.strptime(
+            pl.Datetime("us"),
+            format="%Y-%m-%d %H:%M:%S",
+            strict=False,
+        )
+        .alias(constants.FIELD_EVENT_TIME),
     )
-    return df
 
 
-def parse_event_time(df: pd.DataFrame) -> pd.DataFrame:
+def parse_event_time(df: pl.DataFrame) -> pl.DataFrame:
     """
     Backward-compatible wrapper for parse_event_time_chunk.
     Used in tests and standalone script calls.
@@ -373,65 +392,41 @@ def parse_event_time(df: pd.DataFrame) -> pd.DataFrame:
     return parse_event_time_chunk(df)
 
 
-def validate_event_type(df: pd.DataFrame) -> Tuple[pd.DataFrame, int]:
+def validate_event_type(df: pl.DataFrame) -> Tuple[pl.DataFrame, int]:
     """
     Filter records with valid event_type.
 
-    Returns view (not copy) to save memory; caller must copy if needed.
-
     Args:
-        df: Input DataFrame
+        df: Input Polars frame
 
     Returns:
-        (valid_df, num_rejected): Filtered DataFrame and count of rejected records
+        (valid_df, num_rejected): Filtered frame and count of rejected records
     """
-    mask = df["event_type"].isin(constants.ALLOWED_EVENT_TYPES)
-    num_rejected = (~mask).sum()
+    n_in = df.height
+    allowed = sorted(constants.ALLOWED_EVENT_TYPES)
+    valid_df = df.filter(pl.col("event_type").is_in(allowed))
+    num_rejected = n_in - valid_df.height
 
     if num_rejected > 0:
         logger.warning(f"Rejecting {num_rejected} records with invalid event_type")
-        invalid_types = df.loc[~mask, "event_type"].unique()
-        logger.warning(f"  Invalid types found: {invalid_types}")
 
-    return df[mask], num_rejected
+    return valid_df, num_rejected
 
 
-def transform_to_bronze_chunk(df: pd.DataFrame) -> pd.DataFrame:
+def transform_to_bronze_chunk(df: pl.DataFrame) -> pl.DataFrame:
     """
-    Transform raw DataFrame chunk to bronze schema.
+    Transform raw Polars chunk to bronze schema order and dtypes.
 
     - Rename event_time → source_event_time
-    - Select only schema fields in correct order
-    - Minimal dtype casting (only when needed)
-
-    Args:
-        df: Input raw DataFrame (with parsed event_time)
-
-    Returns:
-        Bronze-formatted DataFrame ready for Arrow conversion
+    - Cast string columns / price coherently with BRONZE_SCHEMA
     """
-    # Rename event_time to source_event_time
-    df = df.rename(
-        columns={constants.FIELD_EVENT_TIME: constants.FIELD_SOURCE_EVENT_TIME}
+    renamed = df.rename(
+        {constants.FIELD_EVENT_TIME: constants.FIELD_SOURCE_EVENT_TIME},
     )
-
-    # Cast only if needed: check current dtype before conversion
-    for column in BRONZE_STRING_COLUMNS:
-        if column in df.columns and df[column].dtype != "string":
-            df[column] = df[column].astype("string")
-
-    # Cast price only if it exists and is not already float64
-    if "price" in df.columns and df["price"].dtype != "float64":
-        df["price"] = pd.to_numeric(df["price"], errors="coerce")
-
-    # Select only schema fields (in order), avoiding unnecessary copy
-    bronze_fields = [field.name for field in schemas.BRONZE_SCHEMA]
-    df = df[bronze_fields]
-
-    return df
+    return finalize_bronze_polars_dtypes(renamed)
 
 
-def transform_to_bronze(df: pd.DataFrame) -> pd.DataFrame:
+def transform_to_bronze(df: pl.DataFrame) -> pl.DataFrame:
     """
     Backward-compatible wrapper for transform_to_bronze_chunk.
     Used in tests and standalone script calls.
@@ -450,20 +445,9 @@ def write_bronze_parquet_chunked(
 ) -> dict:
     """
     Write bronze artifact from raw CSVs using chunked streaming + ParquetWriter.
-
-    This is the main chunked pipeline: reads chunks → validates → transforms → appends to parquet.
-
-    Args:
-        raw_dir: Path to raw data directory
-        output_path: Path to output parquet file
-        chunksize: Rows per chunk (default 200000)
-        memory_log: Enable memory telemetry logging
-
-    Returns:
-        dict with pipeline stats: total_rows_in, total_rows_valid, total_rows_rejected, etc.
     """
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path_p = Path(output_path)
+    output_path_p.parent.mkdir(parents=True, exist_ok=True)
 
     writer = None
     total_rows_in = 0
@@ -482,46 +466,37 @@ def write_bronze_parquet_chunked(
             window_end=window_end,
         ):
             chunk_count += 1
-            rows_in_chunk = len(chunk)
+            rows_in_chunk = chunk.height
             total_rows_in += rows_in_chunk
 
-            # Parse event_time
-            chunk = parse_event_time_chunk(chunk)
-
-            # Validate event_type
-            chunk_valid, chunk_rejected = validate_event_type(chunk)
-            total_rows_valid += len(chunk_valid)
+            chunk_parsed = parse_event_time_chunk(chunk)
+            chunk_valid, chunk_rejected = validate_event_type(chunk_parsed)
+            total_rows_valid += chunk_valid.height
             total_rows_rejected += chunk_rejected
 
-            if len(chunk_valid) == 0:
+            if chunk_valid.height == 0:
                 logger.info(f"  Chunk {chunk_count}: 0 valid rows (all rejected)")
-                del chunk, chunk_valid
+                del chunk, chunk_parsed, chunk_valid
                 if memory_log:
                     gc.collect()
                 continue
 
-            # Transform to bronze schema
             chunk_bronze = transform_to_bronze_chunk(chunk_valid)
 
-            # Convert to Arrow table
             try:
-                table = pa.Table.from_pandas(
-                    chunk_bronze,
-                    schema=schemas.BRONZE_SCHEMA,
-                    preserve_index=False,
-                )
+                table = bronze_polars_to_arrow_table(chunk_bronze)
             except Exception as e:
                 logger.error(f"  Failed to convert chunk {chunk_count} to Arrow: {e}")
                 raise
 
-            # Lazy-init writer on first valid chunk
             if writer is None:
                 writer = pq.ParquetWriter(
-                    output_path, schema=schemas.BRONZE_SCHEMA, compression="snappy"
+                    output_path_p,
+                    schema=schemas.BRONZE_SCHEMA,
+                    compression="snappy",
                 )
-                logger.info(f"Initialized ParquetWriter: {output_path}")
+                logger.info(f"Initialized ParquetWriter: {output_path_p}")
 
-            # Append table to parquet
             writer.write_table(table)
 
             if memory_log:
@@ -530,27 +505,25 @@ def write_bronze_parquet_chunked(
                 throughput = total_rows_in / elapsed if elapsed > 0 else 0
                 logger.info(
                     f"  Chunk {chunk_count}: {rows_in_chunk} rows | "
-                    f"Valid: {len(chunk_valid)} | Rejected: {chunk_rejected} | "
+                    f"Valid: {chunk_valid.height} | Rejected: {chunk_rejected} | "
                     f"RAM: {current_memory_mb:.1f}MB (Δ{current_memory_mb - start_memory_mb:+.1f}MB) | "
                     f"Throughput: {throughput:.0f} rows/s"
                 )
 
-            # Clean up chunk memory
-            del chunk, chunk_valid, chunk_bronze, table
+            del chunk, chunk_parsed, chunk_valid, chunk_bronze, table
             if memory_log:
                 gc.collect()
 
     finally:
-        # Close writer
         if writer is not None:
             writer.close()
-            logger.info(f"✓ Closed ParquetWriter: {output_path}")
+            logger.info(f"✓ Closed ParquetWriter: {output_path_p}")
 
     elapsed_total = time.time() - start_time
     final_memory_mb = get_current_memory_mb()
     avg_throughput = total_rows_in / elapsed_total if elapsed_total > 0 else 0
 
-    stats = {
+    return {
         "total_rows_in": total_rows_in,
         "total_rows_valid": total_rows_valid,
         "total_rows_rejected": total_rows_rejected,
@@ -562,27 +535,17 @@ def write_bronze_parquet_chunked(
         "peak_memory_delta_mb": final_memory_mb - start_memory_mb,
     }
 
-    return stats
+
+def write_bronze_parquet(df: pl.DataFrame, output_path: str) -> None:
+    """Write single Polars bronze frame to Parquet."""
+    output_path_p = Path(output_path)
+    output_path_p.parent.mkdir(parents=True, exist_ok=True)
+    table = bronze_polars_to_arrow_table(finalize_bronze_polars_dtypes(df))
+    pq.write_table(table, output_path_p, compression="snappy")
+    logger.info(f"✓ Wrote bronze artifact: {output_path_p}")
 
 
-def write_bronze_parquet(df: pd.DataFrame, output_path: str) -> None:
-    """
-    Backward-compatible wrapper: write single DataFrame to parquet.
-    Used in tests and full-load scenarios (not chunked).
-    """
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Convert to PyArrow table with schema
-    table = pa.Table.from_pandas(df, schema=schemas.BRONZE_SCHEMA)
-
-    # Write parquet
-    pq.write_table(table, output_path, compression="snappy")
-    logger.info(f"✓ Wrote bronze artifact: {output_path}")
-
-
-def main():
-    """Main entry point for bronze pipeline."""
+def main() -> None:
     parser = argparse.ArgumentParser(
         description="Transform raw CSV data to bronze parquet format (chunked streaming)"
     )
@@ -603,7 +566,7 @@ def main():
         "--chunksize",
         type=int,
         default=200000,
-        help="Number of rows per chunk (default: 200000). Lower for tight RAM, higher for speed.",
+        help="Rows per chunk (default: 200000). Lower for tight RAM, higher for speed.",
     )
     parser.add_argument(
         "--window-profile",
@@ -649,12 +612,11 @@ def main():
     logger.info(f"Memory telemetry: {'enabled' if args.memory_log else 'disabled'}")
     if not HAS_PSUTIL and args.memory_log:
         logger.warning(
-            "  (psutil not available; memory logging limited to DataFrame stats)"
+            "  (psutil not available; memory telemetry limited to DataFrame estimates)"
         )
     logger.info("=" * 70)
 
     try:
-        # Run chunked pipeline
         logger.info("\n1. Reading and transforming raw data in chunks...")
         stats = write_bronze_parquet_chunked(
             args.input,
@@ -666,7 +628,6 @@ def main():
             window_end=args.window_end,
         )
 
-        # Summary
         logger.info("\n" + "=" * 70)
         logger.info("BRONZE PIPELINE SUMMARY")
         logger.info("=" * 70)
