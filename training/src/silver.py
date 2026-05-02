@@ -344,6 +344,24 @@ def get_silver_merge_columns() -> list[str]:
     return list(constants.DEDUP_KEY_FIELDS) + [SILVER_INPUT_ORDER_COLUMN]
 
 
+def choose_silver_merge_batch_size(
+    pipeline_batch_size: int,
+    run_count: int,
+) -> int:
+    """
+    Bound merge memory across all sorted runs.
+
+    Each parquet row iterator holds its current Polars batch until that batch is
+    exhausted. With many runs, using the full pipeline batch size per run can
+    retain run_count * pipeline_batch_size rows during heap initialization.
+    """
+    if pipeline_batch_size <= 0:
+        raise ValueError("pipeline_batch_size must be > 0")
+    if run_count <= 0:
+        return pipeline_batch_size
+    return max(1, pipeline_batch_size // run_count)
+
+
 def sort_silver_working_frame(df: pl.DataFrame) -> pl.DataFrame:
     """Sort by canonical dedup columns then input-order (stable)."""
     return df.sort(
@@ -513,6 +531,7 @@ def finalize_silver_parts(
     parts_dir: str,
     output_path: str,
     stats: SilverPipelineStats,
+    batch_size: int = DEFAULT_SILVER_BATCH_SIZE,
 ) -> None:
     """
     Apply global silver operations to cleaned parts and write final output.
@@ -525,8 +544,25 @@ def finalize_silver_parts(
         return
 
     with TemporaryDirectory(prefix="silver-runs-") as runs_dir:
-        run_paths = write_sorted_silver_runs(str(parts_path), runs_dir)
-        rows = iter_merged_unique_rows(run_paths, stats)
+        run_paths = write_sorted_silver_runs(
+            str(parts_path),
+            runs_dir,
+            batch_size=batch_size,
+        )
+        merge_batch_size = choose_silver_merge_batch_size(
+            pipeline_batch_size=batch_size,
+            run_count=len(run_paths),
+        )
+        logger.info(
+            "Merging %d sorted silver run(s) with row batch size %d",
+            len(run_paths),
+            merge_batch_size,
+        )
+        rows = iter_merged_unique_rows(
+            run_paths,
+            stats,
+            batch_size=merge_batch_size,
+        )
         write_silver_rows(rows, output_path, stats)
 
 
@@ -543,7 +579,7 @@ def run_silver_pipeline(
             str(parts_dir),
             batch_size=batch_size,
         )
-        finalize_silver_parts(str(parts_dir), output_path, stats)
+        finalize_silver_parts(str(parts_dir), output_path, stats, batch_size=batch_size)
         return stats
 
 

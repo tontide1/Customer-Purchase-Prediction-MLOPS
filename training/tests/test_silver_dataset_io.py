@@ -11,6 +11,7 @@ from polars.testing import assert_frame_equal
 from shared import constants, schemas
 from training.src.bronze import finalize_bronze_polars_dtypes, bronze_polars_to_arrow_table
 from training.src.silver import (
+    choose_silver_merge_batch_size,
     enforce_silver_dtypes,
     get_silver_sort_columns,
     normalize_category_code,
@@ -160,6 +161,17 @@ def test_run_silver_pipeline_streams_batches_and_global_dedups(tmp_path) -> None
 
     output_schema = pq.read_table(output_file).schema.remove_metadata()
     assert output_schema == schemas.SILVER_SCHEMA
+
+
+def test_merge_batch_size_is_capped_by_run_count() -> None:
+    batch_size = choose_silver_merge_batch_size(
+        pipeline_batch_size=200_000,
+        run_count=213,
+    )
+
+    assert batch_size == 938
+    assert batch_size * 213 <= 200_000
+    assert choose_silver_merge_batch_size(200_000, run_count=0) == 200_000
 
 
 def test_run_silver_pipeline_keeps_first_duplicate_by_input_order(tmp_path) -> None:
