@@ -1,7 +1,7 @@
 schema: '2.0'
 stages:
   bronze:
-    cmd: python -m training.src.bronze --input data/train_raw --output
+    cmd: python -m training.src.bronze --input data/train_raw --output 
       data/bronze/events.parquet
     deps:
     - path: data/train_raw
@@ -13,29 +13,25 @@ stages:
       hash: md5
       md5: 87cbff908753749bbff2f5825177236d
       size: 2926
-      isexec: true
     - path: shared/schemas.py
       hash: md5
       md5: dc0bf2ac52d73f125606892369f75a30
       size: 2986
-      isexec: true
     - path: training/src/bronze.py
       hash: md5
-      md5: 3d7414c395cc7e7da9eea49ac43fdee4
-      size: 15756
-      isexec: true
+      md5: c7b6aeb29f3eac7b28e23316c806374f
+      size: 21848
     - path: training/src/config.py
       hash: md5
-      md5: 6a19ebe2d8e0ba932439121fb790500b
-      size: 4257
-      isexec: true
+      md5: c388a60c62690fe48cb8db25b252fe93
+      size: 5534
     outs:
     - path: data/bronze/events.parquet
       hash: md5
       md5: 4755b5563f0380cce8d677f2d515a073
       size: 1187246639
   silver:
-    cmd: python -m training.src.silver --input data/bronze/events.parquet
+    cmd: python -m training.src.silver --input data/bronze/events.parquet 
       --output data/silver/events.parquet
     deps:
     - path: data/bronze/events.parquet
