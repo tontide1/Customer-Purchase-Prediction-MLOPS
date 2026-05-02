@@ -70,6 +70,9 @@ def test_write_silver_parquet_supports_dataset_directory(tmp_path) -> None:
     written_files = sorted(output_dir.glob("*.parquet"))
     assert written_files
 
+    schema = pq.read_table(written_files[0]).schema.remove_metadata()
+    assert schema == schemas.SILVER_SCHEMA
+
     round_trip = read_bronze_parquet(str(output_dir))
     assert round_trip.height == 3
 

@@ -474,7 +474,7 @@ def write_silver_rows(
     buffer: list[dict] = []
 
     def flush_buffer() -> None:
-        nonlocal writer, buffer
+        nonlocal writer, buffer  # assignments below bind outer writer (not locals)
         if not buffer:
             return
 
