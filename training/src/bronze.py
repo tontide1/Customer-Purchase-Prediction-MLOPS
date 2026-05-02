@@ -2,13 +2,14 @@
 Bronze layer pipeline: Raw CSV → Bronze Parquet (chunked streaming).
 
 Transforms raw event data from CSV to standardized Parquet format.
-- Reads files in batches via Polars scan_csv → collect_batches (bounded memory)
+- Reads files in batches via the Polars collect_batches iterator
 - Renames event_time → source_event_time
 - Validates event_type
 - Rejects invalid records
 - Outputs immutable parquet artifact via ParquetWriter append
 
-Memory-efficient: peak RAM ~O(chunksize) instead of O(total_data).
+Memory-efficient: peak RAM is bounded by the active Polars batch and transform
+outputs instead of materializing the full raw CSV.
 """
 
 import argparse
@@ -347,6 +348,8 @@ def read_raw_chunks(
         logger.info(f"\nProcessing {file_path.name}...")
 
         try:
+            # In Polars 1.40, collect_batches returns an iterator, not a list.
+            # Avoid wrapping this in list(...) so raw CSV processing stays bounded.
             lf = pl.scan_csv(
                 str(file_path),
                 schema_overrides=_RAW_CSV_SCHEMA_OVERRIDES,

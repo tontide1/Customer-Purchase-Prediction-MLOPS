@@ -10,6 +10,7 @@ Tests core transformations:
 """
 
 import datetime as dt
+import gzip
 import importlib
 
 import polars as pl
@@ -21,6 +22,7 @@ from training.src.bronze import (
     discover_raw_files,
     ensure_not_simulation_raw_input,
     parse_event_time,
+    read_raw_chunks,
     transform_to_bronze,
     validate_event_type,
 )
@@ -125,6 +127,25 @@ class TestBronzeLayer:
         expected_fields = set(schemas.get_bronze_fields())
         actual_fields = set(df_bronze.columns)
         assert expected_fields == actual_fields
+
+    def test_read_raw_chunks_streams_gzip_batches(self, tmp_path) -> None:
+        raw_file = tmp_path / "2019-Oct.csv.gz"
+        rows = [
+            f"2019-10-01 10:00:0{i} UTC,view,{i},cat,code,brand,1.0,u,s"
+            for i in range(5)
+        ]
+        with gzip.open(raw_file, "wt") as f:
+            f.write(
+                "event_time,event_type,product_id,category_id,"
+                "category_code,brand,price,user_id,user_session\n"
+            )
+            f.write("\n".join(rows))
+
+        chunks = read_raw_chunks(str(tmp_path), chunksize=2, window_profile="all")
+
+        assert iter(chunks) is chunks
+        chunk_sizes = [chunk.height for _, chunk in chunks]
+        assert chunk_sizes == [2, 2, 1]
 
 
 class TestSilverLayer:
