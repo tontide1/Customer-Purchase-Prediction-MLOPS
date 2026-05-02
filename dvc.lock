@@ -1,7 +1,7 @@
 schema: '2.0'
 stages:
   bronze:
-    cmd: python -m training.src.bronze --input data/train_raw --output
+    cmd: python -m training.src.bronze --input data/train_raw --output 
       data/bronze/events.parquet
     deps:
     - path: data/train_raw
@@ -13,57 +13,49 @@ stages:
       hash: md5
       md5: 87cbff908753749bbff2f5825177236d
       size: 2926
-      isexec: true
     - path: shared/schemas.py
       hash: md5
       md5: dc0bf2ac52d73f125606892369f75a30
       size: 2986
-      isexec: true
     - path: training/src/bronze.py
       hash: md5
-      md5: 3d7414c395cc7e7da9eea49ac43fdee4
-      size: 15756
-      isexec: true
+      md5: 63565e4e7dd55e61a8b120d7c250478f
+      size: 20857
     - path: training/src/config.py
       hash: md5
-      md5: 6a19ebe2d8e0ba932439121fb790500b
-      size: 4257
-      isexec: true
+      md5: c388a60c62690fe48cb8db25b252fe93
+      size: 5534
     outs:
     - path: data/bronze/events.parquet
       hash: md5
-      md5: 4755b5563f0380cce8d677f2d515a073
-      size: 1187246639
+      md5: f6916426dafab7ad1bdc38ca37f573b5
+      size: 1187278240
   silver:
-    cmd: python -m training.src.silver --input data/bronze/events.parquet
+    cmd: python -m training.src.silver --input data/bronze/events.parquet 
       --output data/silver/events.parquet
     deps:
     - path: data/bronze/events.parquet
       hash: md5
-      md5: 4755b5563f0380cce8d677f2d515a073
-      size: 1187246639
+      md5: f6916426dafab7ad1bdc38ca37f573b5
+      size: 1187278240
     - path: shared/constants.py
       hash: md5
       md5: 87cbff908753749bbff2f5825177236d
       size: 2926
-      isexec: true
     - path: shared/schemas.py
       hash: md5
       md5: dc0bf2ac52d73f125606892369f75a30
       size: 2986
-      isexec: true
     - path: training/src/config.py
       hash: md5
-      md5: 6a19ebe2d8e0ba932439121fb790500b
-      size: 4257
-      isexec: true
+      md5: c388a60c62690fe48cb8db25b252fe93
+      size: 5534
     - path: training/src/silver.py
       hash: md5
-      md5: 5b14497f37de3903d299c98e0b78e114
-      size: 8271
-      isexec: true
+      md5: 0fdbb743e93abba28689778e778774da
+      size: 20568
     outs:
     - path: data/silver/events.parquet
       hash: md5
-      md5: f83f81a9acb53bc4b2728c055007179b
-      size: 1081217339
+      md5: bf4b3d309c639c0ff7466837c59a5fd9
+      size: 1144030599

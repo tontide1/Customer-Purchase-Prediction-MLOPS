@@ -3,6 +3,7 @@ dataset/
 data/**/*.csv.gz
 dataset/**/*.csv.gz
 .codex
+artifacts/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

@@ -4,9 +4,8 @@ Silver layer pipeline: Bronze Parquet → Silver Parquet.
 Cleans and prepares bronze data for modeling:
 - Removes records with missing required fields
 - Keeps null prices but removes records with price <= 0
-- Removes canonical duplicate events
-- Sorts deterministically by user_session + source_event_time
-- Outputs clean, ready-for-modeling artifact
+- Removes canonical duplicate events (global dedup via external merge)
+- Sorts deterministically by user_session + source_event_time + tie-break columns
 """
 
 import argparse
@@ -17,7 +16,7 @@ import logging
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-import pandas as pd
+import polars as pl
 import pyarrow as pa
 import pyarrow.dataset as ds
 import pyarrow.parquet as pq
@@ -25,7 +24,6 @@ import pyarrow.parquet as pq
 from shared import constants, schemas
 from training.src.config import Config
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -46,6 +44,8 @@ SILVER_STRING_COLUMNS = [
     "brand",
 ]
 
+_SILVER_FIELD_ORDER = [field.name for field in schemas.SILVER_SCHEMA]
+
 
 @dataclass
 class SilverPipelineStats:
@@ -58,31 +58,39 @@ class SilverPipelineStats:
     next_input_order: int = 0
 
 
-def get_silver_sort_columns(df: pd.DataFrame) -> list[str]:
+def silver_polars_to_arrow_table(chunk: pl.DataFrame) -> pa.Table:
+    """Cast a silver Polars frame to SILVER_SCHEMA for Parquet writes."""
+    t = chunk.select(_SILVER_FIELD_ORDER).to_arrow()
+    arrays: list[pa.Array] = []
+    for field in schemas.SILVER_SCHEMA:
+        col = t.column(field.name).combine_chunks()
+        if col.type != field.type:
+            col = col.cast(field.type, safe=False)
+        arrays.append(col)
+    return pa.Table.from_arrays(arrays, schema=schemas.SILVER_SCHEMA)
+
+
+def get_silver_sort_columns(df: pl.DataFrame) -> list[str]:
     """
     Return the deterministic silver sort columns in canonical order.
 
     Args:
-        df: Input DataFrame. Kept in the signature so callers can pair this API
-            with validate_silver_sort_columns(df).
+        df: Input frame (signature kept so callers validate columns first).
 
     Returns:
         Ordered column names used for deterministic sorting.
     """
+    _ = df.columns
     return list(constants.DEDUP_KEY_FIELDS)
-
 
 def get_silver_output_fields() -> list[str]:
     """Return silver output columns ordered exactly as SILVER_SCHEMA."""
     return [field.name for field in schemas.SILVER_SCHEMA]
 
 
-def validate_silver_sort_columns(df: pd.DataFrame) -> None:
+def validate_silver_sort_columns(df: pl.DataFrame) -> None:
     """
-    Fail fast if the DataFrame cannot be sorted deterministically.
-
-    Args:
-        df: Input DataFrame
+    Fail fast if the frame cannot be sorted deterministically.
 
     Raises:
         ValueError: If one or more required sort columns are missing.
@@ -93,20 +101,14 @@ def validate_silver_sort_columns(df: pd.DataFrame) -> None:
 
 
 def normalize_category_code(
-    df: pd.DataFrame,
+    df: pl.DataFrame,
     policy: str = "keep",
     fill_value: str = "unknown",
-) -> pd.DataFrame:
+) -> pl.DataFrame:
     """
     Normalize nullable category_code values according to the selected policy.
 
-    Args:
-        df: Input DataFrame
-        policy: "keep" preserves nulls, "fill" replaces nulls with fill_value
-        fill_value: Value used when policy="fill"
-
-    Returns:
-        DataFrame with category_code normalized.
+    policy: "keep" preserves nulls, "fill" replaces nulls with fill_value
 
     Raises:
         ValueError: If policy is not supported.
@@ -115,31 +117,31 @@ def normalize_category_code(
         return df
     if policy == "fill":
         if "category_code" in df.columns:
-            df["category_code"] = df["category_code"].fillna(fill_value)
+            return df.with_columns(pl.col("category_code").fill_null(fill_value))
         return df
 
     raise ValueError(f"Invalid category_code policy: {policy}")
 
 
-def read_bronze_parquet(bronze_path: str) -> pd.DataFrame:
+def read_bronze_parquet(bronze_path: str) -> pl.DataFrame:
     """
-    Read bronze parquet artifact.
+    Read bronze parquet artifact into a Polars frame.
 
     Args:
         bronze_path: Path to bronze parquet file or parquet dataset directory
 
     Returns:
-        DataFrame with bronze data
+        Polars frame with bronze data
     """
-    bronze_path = Path(bronze_path)
+    bronze_path_p = Path(bronze_path)
 
-    if not bronze_path.exists():
+    if not bronze_path_p.exists():
         raise FileNotFoundError(f"Bronze parquet not found: {bronze_path}")
 
-    logger.info(f"Reading bronze artifact: {bronze_path}")
-    table = pq.read_table(bronze_path)
-    df = table.to_pandas()
-    logger.info(f"  ✓ Read {len(df)} rows")
+    logger.info(f"Reading bronze artifact: {bronze_path_p}")
+    table = pq.read_table(bronze_path_p)
+    df = pl.from_arrow(table)
+    logger.info(f"  ✓ Read {df.height} rows")
 
     return df
 
@@ -152,118 +154,103 @@ def iter_bronze_batches(
     Yield record batches from a bronze parquet file or dataset directory.
 
     Args:
-        bronze_path: Path to bronze parquet file or dataset directory
+        bronze_path: Path to bronze parquet file or parquet dataset directory
         batch_size: Maximum rows per yielded batch
 
     Yields:
         PyArrow record batches
     """
-    bronze_path = Path(bronze_path)
+    bronze_path_p = Path(bronze_path)
 
-    if not bronze_path.exists():
+    if not bronze_path_p.exists():
         raise FileNotFoundError(f"Bronze parquet not found: {bronze_path}")
     if batch_size <= 0:
         raise ValueError("batch_size must be > 0")
 
-    logger.info(f"Reading bronze artifact in batches: {bronze_path}")
-    if bronze_path.is_file():
-        parquet_file = pq.ParquetFile(bronze_path)
+    logger.info(f"Reading bronze artifact in batches: {bronze_path_p}")
+    if bronze_path_p.is_file():
+        parquet_file = pq.ParquetFile(bronze_path_p)
         yield from parquet_file.iter_batches(batch_size=batch_size)
         return
 
-    dataset = ds.dataset(bronze_path, format="parquet")
+    dataset = ds.dataset(bronze_path_p, format="parquet")
     yield from dataset.to_batches(batch_size=batch_size)
 
 
-def enforce_silver_dtypes(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Enforce dtypes compatible with SILVER_SCHEMA.
+def enforce_silver_dtypes(df: pl.DataFrame) -> pl.DataFrame:
+    """Normalize dtypes compatible with SILVER_SCHEMA."""
+    exprs: list[pl.Expr] = []
 
-    Args:
-        df: Input DataFrame
-
-    Returns:
-        DataFrame with normalized dtypes
-    """
     if constants.FIELD_SOURCE_EVENT_TIME in df.columns:
-        df[constants.FIELD_SOURCE_EVENT_TIME] = pd.to_datetime(
-            df[constants.FIELD_SOURCE_EVENT_TIME], errors="coerce"
+        exprs.append(
+            pl.col(constants.FIELD_SOURCE_EVENT_TIME).cast(pl.Datetime("us"), strict=False),
         )
 
     for column in SILVER_STRING_COLUMNS:
         if column in df.columns:
-            df[column] = df[column].astype("string")
+            exprs.append(pl.col(column).cast(pl.Utf8, strict=False))
 
     if "price" in df.columns:
-        df["price"] = pd.to_numeric(df["price"], errors="coerce")
+        exprs.append(pl.col("price").cast(pl.Float64, strict=False))
 
-    return df
+    return df.with_columns(*exprs) if exprs else df
 
 
-def check_required_fields(df: pd.DataFrame) -> tuple:
+def _required_silver_columns() -> set[str]:
+    required = constants.REQUIRED_FIELDS.copy()
+    required.discard(constants.FIELD_EVENT_TIME)
+    required.add(constants.FIELD_SOURCE_EVENT_TIME)
+    return required
+
+
+def check_required_fields(df: pl.DataFrame) -> tuple[pl.DataFrame, int]:
     """
-    Check and remove records with missing required fields.
-
-    Args:
-        df: Input DataFrame
+    Remove records with missing required fields.
 
     Returns:
-        (valid_df, num_rejected): Filtered DataFrame and count of rejected records
+        (valid_df, num_rejected): Filtered frame and count of rejected records
     """
     logger.info("Checking required fields...")
-
-    # Required fields in silver layer use source_event_time, not event_time
-    required_fields = constants.REQUIRED_FIELDS.copy()
-    required_fields.discard(constants.FIELD_EVENT_TIME)
-    required_fields.add(constants.FIELD_SOURCE_EVENT_TIME)
-
-    mask = ~df[list(required_fields)].isna().any(axis=1)
-    num_rejected = (~mask).sum()
-
-    if num_rejected > 0:
+    cols = sorted(_required_silver_columns())
+    null_exprs = [pl.col(c).is_null() for c in cols]
+    combined = ~pl.any_horizontal(*null_exprs) if null_exprs else pl.lit(True)
+    valid = df.filter(combined)
+    rejected = df.height - valid.height
+    if rejected > 0:
         logger.warning(
-            f"  Rejected {num_rejected} records with missing required fields"
+            f"  Rejected {rejected} records with missing required fields",
         )
+    return valid, rejected
 
-    return df[mask].copy(), num_rejected
 
-
-def check_price_validity(df: pd.DataFrame) -> tuple:
+def check_price_validity(df: pl.DataFrame) -> tuple[pl.DataFrame, int]:
     """
     Remove records with invalid non-null prices (price <= 0).
 
-    Args:
-        df: Input DataFrame
-
     Returns:
-        (valid_df, num_rejected): Filtered DataFrame and count of rejected records
+        (valid_df, num_rejected): Filtered frame and count of rejected records
     """
     logger.info("Checking price validity...")
+    mask = pl.col("price").is_null() | (
+        pl.col("price") > constants.DEFAULT_PRICE_THRESHOLD
+    )
+    valid = df.filter(mask)
+    rejected = df.height - valid.height
+    if rejected > 0:
+        logger.warning(f"  Rejected {rejected} records with invalid price")
+    return valid, rejected
 
-    # Null price is allowed; only non-null non-positive prices are rejected.
-    mask = df["price"].isna() | (df["price"] > constants.DEFAULT_PRICE_THRESHOLD)
-    num_rejected = (~mask).sum()
 
-    if num_rejected > 0:
-        logger.warning(f"  Rejected {num_rejected} records with invalid price")
-
-    return df[mask].copy(), num_rejected
-
-
-def deduplicate_events(df: pd.DataFrame) -> tuple:
-    """
-    Remove duplicate events using the canonical event key.
-
-    The canonical key matches the planned event_id contract:
-    user_session | source_event_time | event_type | product_id | user_id
-    """
+def deduplicate_events(df: pl.DataFrame) -> tuple:
+    """Remove duplicates by canonical dedup keys; preserves first occurrence order."""
     logger.info("Deduplicating events by canonical key...")
-    before_count = len(df)
-    deduplicated = df.drop_duplicates(
+    before_count = df.height
+    deduplicated = df.unique(
         subset=list(constants.DEDUP_KEY_FIELDS),
+        maintain_order=True,
         keep="first",
-    ).copy()
-    num_duplicates = before_count - len(deduplicated)
+    )
+    num_duplicates = before_count - deduplicated.height
 
     if num_duplicates > 0:
         logger.warning(f"  Removed {num_duplicates} duplicate record(s)")
@@ -271,16 +258,8 @@ def deduplicate_events(df: pd.DataFrame) -> tuple:
     return deduplicated, num_duplicates
 
 
-def clean_silver_batch(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
-    """
-    Apply per-batch silver dtype normalization and row-level validations.
-
-    Args:
-        df: Input bronze batch converted to pandas
-
-    Returns:
-        (clean_df, rejected_rows): Filtered batch and number of rejected rows
-    """
+def clean_silver_batch(df: pl.DataFrame) -> tuple[pl.DataFrame, int]:
+    """Apply dtype normalization + row validations for one bronze-derived batch."""
     df = enforce_silver_dtypes(df)
     df = normalize_category_code(df, policy="keep")
 
@@ -294,32 +273,20 @@ def clean_silver_batch(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
     return df, total_rejected
 
 
-def sort_deterministic(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Sort records deterministically by canonical event key columns.
-
-    Args:
-        df: Input DataFrame
-
-    Returns:
-        Sorted DataFrame
-    """
+def sort_deterministic(df: pl.DataFrame) -> pl.DataFrame:
+    """Sort deterministically using canonical tie-break ordering."""
     validate_silver_sort_columns(df)
     sort_columns = get_silver_sort_columns(df)
     logger.info(f"Sorting deterministically by {sort_columns}...")
-    df = df.sort_values(
-        by=sort_columns,
-        ascending=True,
-    ).reset_index(drop=True)
-    logger.info(f"  ✓ Sorted {len(df)} records")
-
-    return df
+    out = df.sort(sort_columns, maintain_order=True)
+    logger.info(f"  ✓ Sorted {out.height} records")
+    return out
 
 
-def empty_silver_dataframe() -> pd.DataFrame:
-    """Return an empty DataFrame with columns ordered by SILVER_SCHEMA."""
+def empty_silver_dataframe() -> pl.DataFrame:
+    """Return an empty frame with SILVER_SCHEMA columns dtypes."""
     table = pa.Table.from_batches([], schema=schemas.SILVER_SCHEMA)
-    return table.to_pandas()
+    return pl.from_arrow(table)
 
 
 def get_silver_working_fields() -> list[str]:
@@ -327,19 +294,15 @@ def get_silver_working_fields() -> list[str]:
     return get_silver_output_fields() + [SILVER_INPUT_ORDER_COLUMN]
 
 
-def add_input_order(df: pd.DataFrame, stats: SilverPipelineStats) -> pd.DataFrame:
-    """
-    Add a monotonic source-order column for deterministic global deduplication.
-
-    The final output is sorted by canonical event key, but duplicate keys must
-    keep the first surviving record from bronze input order. This temporary
-    column makes that possible during the external merge step.
-    """
+def add_input_order(df: pl.DataFrame, stats: SilverPipelineStats) -> pl.DataFrame:
+    """Attach monotonic input order for deterministic global duplicate resolution."""
     start_order = stats.next_input_order
-    end_order = start_order + len(df)
-    df[SILVER_INPUT_ORDER_COLUMN] = range(start_order, end_order)
+    end_order = start_order + df.height
+    orders = range(start_order, end_order)
     stats.next_input_order = end_order
-    return df
+    return df.with_columns(
+        pl.Series(SILVER_INPUT_ORDER_COLUMN, list(orders), dtype=pl.Int64),
+    )
 
 
 def write_cleaned_silver_batch_parts(
@@ -348,10 +311,7 @@ def write_cleaned_silver_batch_parts(
     batch_size: int = DEFAULT_SILVER_BATCH_SIZE,
 ) -> SilverPipelineStats:
     """
-    Stream bronze batches through per-row silver validations into parquet parts.
-
-    Global operations such as canonical deduplication and deterministic sorting
-    are intentionally deferred until all parts have been written.
+    Stream bronze batches through validations into parquet parts prior to finalize.
     """
     parts_path = Path(parts_dir)
     parts_path.mkdir(parents=True, exist_ok=True)
@@ -361,16 +321,16 @@ def write_cleaned_silver_batch_parts(
 
     for batch in iter_bronze_batches(bronze_path, batch_size=batch_size):
         stats.input_rows += batch.num_rows
-        df = batch.to_pandas()
+        df = pl.from_arrow(batch)
         df, rejected = clean_silver_batch(df)
         stats.rejected_rows += rejected
 
-        if df.empty:
+        if df.height == 0:
             continue
 
         df = add_input_order(df, stats)
-        df = df[get_silver_working_fields()]
-        table = pa.Table.from_pandas(df, preserve_index=False)
+        df = df.select(get_silver_working_fields())
+        table = df.to_arrow()
         part_path = parts_path / f"part-{part_index:05d}.parquet"
         pq.write_table(table, part_path, compression="snappy")
         logger.info(f"  Wrote cleaned silver batch part: {part_path}")
@@ -380,17 +340,35 @@ def write_cleaned_silver_batch_parts(
 
 
 def get_silver_merge_columns() -> list[str]:
-    """Return columns used for sorted runs and merge ordering."""
+    """Columns used for sorted runs + merge ordering."""
     return list(constants.DEDUP_KEY_FIELDS) + [SILVER_INPUT_ORDER_COLUMN]
 
 
-def sort_silver_working_frame(df: pd.DataFrame) -> pd.DataFrame:
-    """Sort a working silver batch by canonical key plus input order."""
-    return df.sort_values(
-        by=get_silver_merge_columns(),
-        ascending=True,
-        kind="mergesort",
-    ).reset_index(drop=True)
+def choose_silver_merge_batch_size(
+    pipeline_batch_size: int,
+    run_count: int,
+) -> int:
+    """
+    Bound merge memory across all sorted runs.
+
+    Each parquet row iterator holds its current Polars batch until that batch is
+    exhausted. With many runs, using the full pipeline batch size per run can
+    retain run_count * pipeline_batch_size rows during heap initialization.
+    """
+    if pipeline_batch_size <= 0:
+        raise ValueError("pipeline_batch_size must be > 0")
+    if run_count <= 0:
+        return pipeline_batch_size
+    return max(1, pipeline_batch_size // run_count)
+
+
+def sort_silver_working_frame(df: pl.DataFrame) -> pl.DataFrame:
+    """Sort by canonical dedup columns then input-order (stable)."""
+    return df.sort(
+        get_silver_merge_columns(),
+        maintain_order=True,
+        multithreaded=False,
+    )
 
 
 def write_sorted_silver_runs(
@@ -399,11 +377,9 @@ def write_sorted_silver_runs(
     batch_size: int = DEFAULT_SILVER_BATCH_SIZE,
 ) -> list[Path]:
     """
-    Sort cleaned working parts into bounded parquet runs.
+    Sort cleaned working parts into bounded parquet runs suitable for heap merge.
 
-    Each run is at most one configured batch in memory. Runs are later merged
-    with a heap so finalize memory is O(batch size * run count), not O(total
-    cleaned rows).
+    Peak memory bounded by configured batch sizes.
     """
     runs_path = Path(runs_dir)
     runs_path.mkdir(parents=True, exist_ok=True)
@@ -411,20 +387,16 @@ def write_sorted_silver_runs(
     run_paths: list[Path] = []
     source = ds.dataset(parts_dir, format="parquet")
     for run_index, batch in enumerate(source.to_batches(batch_size=batch_size)):
-        df = batch.to_pandas()
-        if df.empty:
+        df = pl.from_arrow(batch)
+        if df.height == 0:
             continue
 
         df = enforce_silver_dtypes(df)
-        df[SILVER_INPUT_ORDER_COLUMN] = pd.to_numeric(
-            df[SILVER_INPUT_ORDER_COLUMN],
-            errors="raise",
-        ).astype("int64")
-        df = sort_silver_working_frame(df[get_silver_working_fields()])
+        df = df.with_columns(pl.col(SILVER_INPUT_ORDER_COLUMN).cast(pl.Int64, strict=True))
+        df = sort_silver_working_frame(df.select(get_silver_working_fields()))
 
         run_path = runs_path / f"run-{run_index:05d}.parquet"
-        table = pa.Table.from_pandas(df, preserve_index=False)
-        pq.write_table(table, run_path, compression="snappy")
+        pq.write_table(df.to_arrow(), run_path, compression="snappy")
         run_paths.append(run_path)
         logger.info(f"  Wrote sorted silver run: {run_path}")
 
@@ -432,21 +404,21 @@ def write_sorted_silver_runs(
 
 
 def iter_parquet_rows(path: Path, batch_size: int) -> Iterator[dict]:
-    """Yield rows from a parquet file without loading the full file."""
+    """Yield rows from a parquet file without loading the entire file."""
     parquet_file = pq.ParquetFile(path)
     for batch in parquet_file.iter_batches(batch_size=batch_size):
-        df = batch.to_pandas()
-        for row in df.to_dict(orient="records"):
-            yield row
+        df = pl.from_arrow(batch)
+        yield from df.iter_rows(named=True)
 
 
 def row_merge_key(row: dict) -> tuple:
-    """Return the heap key for a working silver row."""
+    """Heap key preserving global merge order."""
     return tuple(row[column] for column in get_silver_merge_columns())
 
 
 def row_dedup_key(row: dict) -> tuple:
-    """Return the canonical deduplication key for a working silver row."""
+    """Canonical dedupe key."""
+
     return tuple(row[column] for column in constants.DEDUP_KEY_FIELDS)
 
 
@@ -456,11 +428,8 @@ def iter_merged_unique_rows(
     batch_size: int = DEFAULT_SILVER_BATCH_SIZE,
 ) -> Iterator[dict]:
     """
-    Merge sorted runs and yield globally sorted, deduplicated silver rows.
-
-    Duplicate keys are adjacent during the merge. Because input order is part of
-    the merge key, the first duplicate popped is the first surviving record from
-    the bronze stream.
+    Merge sorted runs and emit globally deduplicated silver rows preserving:
+    deterministic sort ordering and first-survivor duplicates by bronze stream order.
     """
     iterators = [iter_parquet_rows(path, batch_size=batch_size) for path in run_paths]
     heap: list[tuple[tuple, int, dict]] = []
@@ -497,17 +466,17 @@ def prepare_silver_output_target(output_path: str) -> Path:
     A path ending in .parquet is treated as a single parquet file. Any other
     path is treated as a dataset directory containing part-000.parquet.
     """
-    output_path = Path(output_path)
+    output_path_p = Path(output_path)
 
-    if output_path.suffix == ".parquet":
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        return output_path
+    if output_path_p.suffix == ".parquet":
+        output_path_p.parent.mkdir(parents=True, exist_ok=True)
+        return output_path_p
 
-    if output_path.exists() and any(output_path.iterdir()):
+    if output_path_p.exists() and any(output_path_p.iterdir()):
         raise FileExistsError(f"Silver dataset directory is not empty: {output_path}")
 
-    output_path.mkdir(parents=True, exist_ok=True)
-    return output_path / "part-000.parquet"
+    output_path_p.mkdir(parents=True, exist_ok=True)
+    return output_path_p / "part-000.parquet"
 
 
 def write_silver_rows(
@@ -516,24 +485,20 @@ def write_silver_rows(
     stats: SilverPipelineStats,
     batch_size: int = DEFAULT_SILVER_BATCH_SIZE,
 ) -> None:
-    """Stream final silver rows to parquet without materializing all rows."""
+    """Append silver rows via ParquetWriter using bounded Polars batches."""
     target_path = prepare_silver_output_target(output_path)
     output_fields = get_silver_output_fields()
-    writer = None
+    writer: pq.ParquetWriter | None = None
     buffer: list[dict] = []
 
     def flush_buffer() -> None:
-        nonlocal writer, buffer
+        nonlocal writer, buffer  # assignments below bind outer writer (not locals)
         if not buffer:
             return
 
-        df = pd.DataFrame.from_records(buffer, columns=output_fields)
-        df = enforce_silver_dtypes(df)
-        table = pa.Table.from_pandas(
-            df[output_fields],
-            schema=schemas.SILVER_SCHEMA,
-            preserve_index=False,
-        )
+        df_batch = enforce_silver_dtypes(pl.DataFrame(buffer))
+        table = silver_polars_to_arrow_table(df_batch.select(output_fields))
+
         if writer is None:
             writer = pq.ParquetWriter(
                 target_path,
@@ -541,7 +506,7 @@ def write_silver_rows(
                 compression="snappy",
             )
         writer.write_table(table)
-        buffer = []
+        buffer.clear()
 
     try:
         for row in rows:
@@ -566,12 +531,12 @@ def finalize_silver_parts(
     parts_dir: str,
     output_path: str,
     stats: SilverPipelineStats,
+    batch_size: int = DEFAULT_SILVER_BATCH_SIZE,
 ) -> None:
     """
     Apply global silver operations to cleaned parts and write final output.
 
-    This is an external sort + k-way merge. It preserves global ordering and
-    deduplication semantics without loading all cleaned rows into pandas.
+    External sort + k-way merge; bounded memory versus full materialization.
     """
     parts_path = Path(parts_dir)
     if not any(parts_path.glob("*.parquet")):
@@ -579,8 +544,25 @@ def finalize_silver_parts(
         return
 
     with TemporaryDirectory(prefix="silver-runs-") as runs_dir:
-        run_paths = write_sorted_silver_runs(str(parts_path), runs_dir)
-        rows = iter_merged_unique_rows(run_paths, stats)
+        run_paths = write_sorted_silver_runs(
+            str(parts_path),
+            runs_dir,
+            batch_size=batch_size,
+        )
+        merge_batch_size = choose_silver_merge_batch_size(
+            pipeline_batch_size=batch_size,
+            run_count=len(run_paths),
+        )
+        logger.info(
+            "Merging %d sorted silver run(s) with row batch size %d",
+            len(run_paths),
+            merge_batch_size,
+        )
+        rows = iter_merged_unique_rows(
+            run_paths,
+            stats,
+            batch_size=merge_batch_size,
+        )
         write_silver_rows(rows, output_path, stats)
 
 
@@ -589,9 +571,7 @@ def run_silver_pipeline(
     output_path: str,
     batch_size: int = DEFAULT_SILVER_BATCH_SIZE,
 ) -> SilverPipelineStats:
-    """
-    Run the silver pipeline using batch-oriented I/O and a global finalization.
-    """
+    """Streaming silver pipeline with finalize external merge."""
     with TemporaryDirectory(prefix="silver-cleaned-") as temp_dir:
         parts_dir = Path(temp_dir) / "parts"
         stats = write_cleaned_silver_batch_parts(
@@ -599,36 +579,22 @@ def run_silver_pipeline(
             str(parts_dir),
             batch_size=batch_size,
         )
-        finalize_silver_parts(str(parts_dir), output_path, stats)
+        finalize_silver_parts(str(parts_dir), output_path, stats, batch_size=batch_size)
         return stats
 
 
-def write_silver_parquet(df: pd.DataFrame, output_path: str) -> None:
-    """
-    Write DataFrame to Silver Parquet file or dataset directory.
-
-    Args:
-        df: Input DataFrame
-        output_path: Path to output parquet file, or dataset directory when the
-            path does not end in .parquet
-    """
+def write_silver_parquet(df: pl.DataFrame, output_path: str) -> None:
+    """Write silver Polars frame as Parquet single file or dataset directory."""
     target_path = prepare_silver_output_target(output_path)
-
-    # Reorder columns to match schema order
     silver_fields = get_silver_output_fields()
-    df = df[silver_fields]
-
-    # Convert to PyArrow table with schema
-    table = pa.Table.from_pandas(df, schema=schemas.SILVER_SCHEMA)
-
+    table = silver_polars_to_arrow_table(df.select(silver_fields))
     pq.write_table(table, target_path, compression="snappy")
     logger.info(f"✓ Wrote silver artifact: {target_path}")
 
 
-def main():
-    """Main entry point for silver pipeline."""
+def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Clean bronze data and produce silver artifact"
+        description="Clean bronze data and produce silver artifact",
     )
     parser.add_argument(
         "--input",
@@ -661,7 +627,6 @@ def main():
             batch_size=args.batch_size,
         )
 
-        # Summary
         logger.info("\n" + "=" * 70)
         logger.info("SILVER PIPELINE SUMMARY")
         logger.info("=" * 70)
