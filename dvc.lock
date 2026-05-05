@@ -19,8 +19,8 @@ stages:
       size: 2986
     - path: training/src/bronze.py
       hash: md5
-      md5: 63565e4e7dd55e61a8b120d7c250478f
-      size: 20857
+      md5: fadb5700739f3988a774d3582dc09d8c
+      size: 21066
     - path: training/src/config.py
       hash: md5
       md5: c388a60c62690fe48cb8db25b252fe93
