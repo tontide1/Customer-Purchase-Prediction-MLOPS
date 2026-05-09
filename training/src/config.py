@@ -21,8 +21,8 @@ class Config:
     )
     RETRAIN_RAW_DATA_DIR = os.getenv("RETRAIN_RAW_DATA_DIR", "data/retrain_raw")
     RETRAIN_DATA_DIR = os.getenv("RETRAIN_DATA_DIR", "data/retrain")
-    BRONZE_DATA_PATH = os.getenv("BRONZE_DATA_PATH", "data/bronze/events.parquet")
-    SILVER_DATA_PATH = os.getenv("SILVER_DATA_PATH", "data/silver/events.parquet")
+    BRONZE_DATA_PATH = os.getenv("BRONZE_DATA_PATH", "data/bronze")
+    SILVER_DATA_PATH = os.getenv("SILVER_DATA_PATH", "data/silver")
     GOLD_DATA_DIR = os.getenv("GOLD_DATA_DIR", "data/gold")
     RETRAIN_WINDOW_DAYS = int(os.getenv("RETRAIN_WINDOW_DAYS", "7"))
 

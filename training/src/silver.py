@@ -139,7 +139,10 @@ def read_bronze_parquet(bronze_path: str) -> pl.DataFrame:
         raise FileNotFoundError(f"Bronze parquet not found: {bronze_path}")
 
     logger.info(f"Reading bronze artifact: {bronze_path_p}")
-    table = pq.read_table(bronze_path_p)
+    if bronze_path_p.is_file():
+        table = pq.read_table(bronze_path_p)
+    else:
+        table = ds.dataset(bronze_path_p, format="parquet").to_table()
     df = pl.from_arrow(table)
     logger.info(f"  ✓ Read {df.height} rows")
 
