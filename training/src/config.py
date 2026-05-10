@@ -138,6 +138,7 @@ class Config:
             "optuna_target_trials": cls.OPTUNA_TARGET_TRIALS,
             "optuna_timeout_seconds": cls.OPTUNA_TIMEOUT_SECONDS,
             "min_validation_pr_auc_threshold": cls.MIN_VALIDATION_PR_AUC_THRESHOLD,
+            "test_sample_size": cls.TEST_SAMPLE_SIZE,
             "smoke_mode_enabled": cls.SMOKE_MODE_ENABLED,
         }
 
