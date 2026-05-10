@@ -10,30 +10,55 @@
 ## What is real in this repo (today)
 
 - Treat `docs/BLUEPRINT/*.md` and `BLUEPRINT.md` as target-state design; many snippets are illustrative, not executable.
-- Executable Week 1 data foundation exists in:
+- **Sprint 2a** is implemented in `main`:
+  - bronze/silver write dataset directories
+  - `training/src/session_split.py` builds `data/gold/session_split_map.parquet`
+  - `training/src/gold.py` writes `data/gold/train.parquet`, `data/gold/val.parquet`, `data/gold/test.parquet`
+  - `shared/parquet.py` holds the shared parquet file/dataset reader
+- **Sprint 2b** (training pipeline) is implemented in branch `feature/sprint2b`:
+  - 7 new training deps: scikit-learn, xgboost, lightgbm, mlflow, shap, optuna, matplotlib
+  - MLflow service in `docker-compose.yml` (port 5000, SQLite backend, named volume)
+  - MLflow/Optuna configs in `training/src/config.py` (env-aware via `os.getenv()`)
+  - `training/src/evaluate.py`: `compute_metrics()` returns `tuple[dict, float]` — metrics dict + threshold
+  - `training/src/model_validation.py`: fail-closed validation gate with manual override
+  - `training/src/data_lineage.py`: manifest hashing (chunked) + row counting via metadata
+  - `training/src/explainability.py`: SHAP artifacts + summary plot for winner model
+  - `training/src/train.py`: orchestration (XGBoost, LightGBM, RandomForest + Optuna + MLflow)
+  - `dvc.yaml` has `train` stage depending on gold outputs
+  - Gold streaming refactor: uses `pq.ParquetWriter` to avoid OOM on 42M rows
+  - Gold files are file-based (`data/bronze/events.parquet`, `data/gold/*.parquet`) not directories
+- Executable data & training foundation exists in:
   - `training/src/config.py`, `training/src/bronze.py`, `training/src/silver.py`
-  - `shared/constants.py`, `shared/schemas.py`
-  - `training/tests/test_data_lake.py`, `training/tests/test_raw_window_selection.py`, `training/tests/test_silver_dataset_io.py`
-  - `dvc.yaml` (only `bronze` and `silver` stages)
-- Infra scaffold currently implemented: `docker-compose.yml` + `infra/minio/init-bucket.sh` (MinIO + bucket init only).
-- Repo-level packaging/tooling now exists:
-  - `pyproject.toml` supports editable install with `shared*` and `training*`, runtime deps, dev deps, pytest, Ruff, and mypy config.
-  - `.pre-commit-config.yaml` runs hygiene hooks plus `ruff-check` and `ruff-format`.
-  - `.github/workflows/ci.yml` runs Python 3.11/3.12 matrix checks: install, Ruff, pytest, and `dvc dag`.
-  - `README.md` is the top-level quick-start for new users.
-- There is still no repo-level `Makefile` or `requirements*.txt`.
+  - `training/src/features.py`, `training/src/session_split.py`, `training/src/gold.py`
+  - `training/src/evaluate.py`, `training/src/model_validation.py`, `training/src/data_lineage.py`
+  - `training/src/explainability.py`, `training/src/train.py`
+  - `shared/constants.py`, `shared/schemas.py`, `shared/parquet.py`
+  - `training/tests/` (73 tests total across 10 test files)
+  - `dvc.yaml` (`bronze` -> `silver` -> `session_split` -> `gold` -> `train`)
+- Infra scaffold: `docker-compose.yml` (MinIO + MLflow) + `infra/minio/init-bucket.sh`
+- Repo-level packaging/tooling:
+  - `pyproject.toml` with `shared*` and `training*`, runtime/optional deps, pytest, Ruff, mypy
+  - `.pre-commit-config.yaml`: hygiene + `ruff-check` + `ruff-format`
+  - `.github/workflows/ci.yml`: Python 3.11/3.12 matrix — install, Ruff, pytest, `dvc dag`
+  - `README.md` as top-level quick-start
+- No repo-level `Makefile` or `requirements*.txt`.
 
 ## Environment and command baseline
 
 - Preferred Python env: `conda activate MLOPS` (expected Python 3.11.x in this env).
 - Install package/dev tooling with `python -m pip install -e ".[dev]"`.
 - If `python` is unavailable outside conda, use `python3` for scripts.
-- Start local object storage: `docker compose up -d` (MinIO only).
-- Quick health check: `docker compose ps` (MinIO ports `9000` API, `9001` console).
-- Week 1 pipeline commands:
+- Start local object storage: `docker compose up -d` (MinIO + MLflow).
+- Quick health check: `docker compose ps` (MinIO ports `9000` API, `9001` console; MLflow port `5000`).
+- Sprint 2a pipeline commands (> main branch; Sprint 2b adds train stage):
   - `python -m training.src.bronze --input data/train_raw --output data/bronze/events.parquet`
   - `python -m training.src.silver --input data/bronze/events.parquet --output data/silver/events.parquet`
-  - `dvc repro` runs only `bronze` -> `silver` per current `dvc.yaml`.
+  - `python -m training.src.session_split --input data/silver --output data/gold/session_split_map.parquet`
+  - `python -m training.src.gold --input data/silver --split-map data/gold/session_split_map.parquet --output data/gold`
+  - `dvc repro` now runs `bronze` -> `silver` -> `session_split` -> `gold`.
+- Sprint 2b pipeline (branch `feature/sprint2b`):
+  - `python -m training.src.train --train data/gold/train.parquet --val data/gold/val.parquet --test data/gold/test.parquet --session-split-map data/gold/session_split_map.parquet --smoke-mode`
+  - Without `--smoke-mode`: full Optuna search (50 trials, ~1hr)
 - Use module-mode commands (`python -m training.src...`) rather than direct script paths. The old `sys.path.insert(...)` import hacks were removed from `training/src` and tests.
 - Common verification commands:
   - `ruff check .`
@@ -50,6 +75,10 @@
 - Silver supports parquet file input and parquet dataset directory input.
 - Silver clean phase reads bronze in batches. Final global dedup/sort is implemented as external sort + k-way merge over temporary parquet runs, so `finalize_silver_parts` must not be changed back to `read_bronze_parquet(parts_path)` / full pandas load.
 - Silver duplicate semantics are locked: canonical duplicate keys keep the first surviving record in bronze input order. The temporary `_silver_input_order` column exists only to preserve this during external merge and must not be written to the final `SILVER_SCHEMA` output.
+- `compute_metrics()` returns `tuple[dict, float]` — metrics dict + threshold. The dict contains `confusion_matrix` (numpy array) which must be filtered out before `mlflow.log_metrics()` (only accepts scalars).
+- Gold streaming: use `pa.Table.from_pydict(data, schema=schema)` not `pl.DataFrame().to_arrow()` for ParquetWriter input; Polars type inference breaks on null columns.
+- LightGBM v4.x: `is_unbalance` conflicts with `scale_pos_weight` — use one or the other, not both.
+- SHAP binary classification with RandomForest produces 3D array `(n_samples, n_features, n_classes)` — extract class 1 via `shap_values[:, :, 1]`.
 
 ## Contracts to preserve when touching architecture/docs
 
