@@ -62,3 +62,23 @@ stages:
           desc: "Validation gold snapshots"
       - data/gold/test.parquet:
           desc: "Test gold snapshots"
+
+  train:
+    desc: "Train three models, select winner by validation PR-AUC, validate against production"
+    cmd: python -m training.src.train --train data/gold/train.parquet --val data/gold/val.parquet --test data/gold/test.parquet --session-split-map data/gold/session_split_map.parquet
+    deps:
+      - training/src/train.py
+      - training/src/evaluate.py
+      - training/src/model_validation.py
+      - training/src/explainability.py
+      - training/src/data_lineage.py
+      - training/src/config.py
+      - shared/constants.py
+      - shared/schemas.py
+      - data/gold/train.parquet
+      - data/gold/val.parquet
+      - data/gold/test.parquet
+      - data/gold/session_split_map.parquet
+    outs:
+      - mlruns:
+          desc: "MLflow experiment tracking directory (local)"
