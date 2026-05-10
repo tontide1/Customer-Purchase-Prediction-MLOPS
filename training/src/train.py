@@ -1,6 +1,7 @@
 """Training orchestration: three models, Optuna search, MLflow tracking."""
 
 import argparse
+import json
 import logging
 from typing import Tuple, Dict
 
@@ -26,6 +27,19 @@ MLFLOW_EXPERIMENT_NAME = Config.MLFLOW_EXPERIMENT_NAME
 OPTUNA_SMOKE_TRIALS = Config.OPTUNA_SMOKE_TRIALS
 OPTUNA_TARGET_TRIALS = Config.OPTUNA_TARGET_TRIALS
 MIN_VALIDATION_PR_AUC_THRESHOLD = Config.MIN_VALIDATION_PR_AUC_THRESHOLD
+
+
+def _log_metrics(metrics: dict, confusion_matrix_name: str) -> None:
+    scalar_metrics = {
+        key: float(value)
+        for key, value in metrics.items()
+        if isinstance(value, (int, float, np.floating))
+    }
+    mlflow.log_metrics(scalar_metrics)
+    mlflow.log_text(
+        json.dumps(metrics["confusion_matrix"].tolist()),
+        confusion_matrix_name,
+    )
 
 
 def load_gold_data(train_path: str, val_path: str, test_path: str):
@@ -208,21 +222,21 @@ def main():
     # Train XGBoost
     with mlflow.start_run(run_name="xgboost"):
         xgb_model, xgb_metrics = train_xgboost_candidate(X_train, y_train, X_val, y_val, n_trials)
-        mlflow.log_metrics(xgb_metrics)
+        _log_metrics(xgb_metrics, "xgboost_confusion_matrix.json")
         mlflow.sklearn.log_model(xgb_model, "model")
         results["xgboost"] = {"model": xgb_model, "metrics": xgb_metrics}
 
     # Train LightGBM
     with mlflow.start_run(run_name="lightgbm"):
         lgb_model, lgb_metrics = train_lightgbm_candidate(X_train, y_train, X_val, y_val, n_trials)
-        mlflow.log_metrics(lgb_metrics)
+        _log_metrics(lgb_metrics, "lightgbm_confusion_matrix.json")
         mlflow.sklearn.log_model(lgb_model, "model")
         results["lightgbm"] = {"model": lgb_model, "metrics": lgb_metrics}
 
     # Train Random Forest
     with mlflow.start_run(run_name="random_forest"):
         rf_model, rf_metrics = train_random_forest_candidate(X_train, y_train, X_val, y_val)
-        mlflow.log_metrics(rf_metrics)
+        _log_metrics(rf_metrics, "random_forest_confusion_matrix.json")
         mlflow.sklearn.log_model(rf_model, "model")
         results["random_forest"] = {"model": rf_model, "metrics": rf_metrics}
 

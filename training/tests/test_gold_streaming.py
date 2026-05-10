@@ -1,6 +1,6 @@
 """Tests for the streaming gold snapshot builder."""
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 import polars as pl
 import pyarrow.parquet as pq
@@ -118,4 +118,17 @@ def test_streaming_gold_empty_split_map_raises(tmp_path):
     split_map_path = _make_split_map(tmp_path, {})
 
     with pytest.raises(ValueError, match="split map is missing or empty"):
+        build_gold_snapshots(silver_path, split_map_path, tmp_path / "out")
+
+
+def test_streaming_gold_invalid_split_raises(tmp_path):
+    silver_path = _make_silver(
+        tmp_path,
+        {
+            "S001": [{"time": _ts("2019-10-01T10:00:00"), "type": "view"}],
+        },
+    )
+    split_map_path = _make_split_map(tmp_path, {"S001": "holdout"})
+
+    with pytest.raises(ValueError, match="Unexpected split value"):
         build_gold_snapshots(silver_path, split_map_path, tmp_path / "out")

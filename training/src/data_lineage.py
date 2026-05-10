@@ -1,7 +1,7 @@
 """Lightweight data lineage metadata for MLflow logging."""
 
-import os
 import hashlib
+import os
 from pathlib import Path
 from typing import Optional, Dict, Any
 from datetime import datetime
@@ -11,10 +11,12 @@ def compute_manifest_hash(data_path: str) -> str:
     """Compute hash of all files in data directory."""
     file_hashes = []
     for f in sorted(Path(data_path).rglob("*.parquet")):
+        hasher = hashlib.md5()
         with open(f, "rb") as fp:
-            content_hash = hashlib.md5(fp.read()).hexdigest()
-            file_hashes.append(content_hash)
-    
+            while chunk := fp.read(8192):
+                hasher.update(chunk)
+        file_hashes.append(hasher.hexdigest())
+
     combined = "".join(file_hashes)
     return hashlib.md5(combined.encode()).hexdigest()
 
@@ -64,7 +66,7 @@ def _count_rows(parquet_path: str) -> int:
     """Count rows in a parquet file without loading all data."""
     try:
         import pyarrow.parquet as pq
-        table = pq.read_table(parquet_path)
-        return table.num_rows
+        parquet_file = pq.ParquetFile(parquet_path)
+        return parquet_file.metadata.num_rows
     except Exception:
         return 0

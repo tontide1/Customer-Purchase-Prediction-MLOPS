@@ -1,12 +1,15 @@
 """SHAP explainability artifacts for best model."""
 
+import os
+import pickle
+import tempfile
+import uuid
+from pathlib import Path
+from typing import Any, Dict
+
+import matplotlib.pyplot as plt
 import numpy as np
 import shap
-import matplotlib.pyplot as plt
-import tempfile
-import os
-from typing import Any, Dict
-import pickle
 
 
 def generate_shap_artifacts(
@@ -45,7 +48,7 @@ def generate_shap_artifacts(
     
     # Create summary plot
     temp_dir = tempfile.gettempdir()
-    summary_plot_path = os.path.join(temp_dir, "shap_summary_plot.png")
+    summary_plot_path = os.path.join(temp_dir, f"shap_summary_plot_{uuid.uuid4().hex}.png")
     
     # Generate and save the plot
     plt.figure(figsize=(10, 6))
@@ -63,11 +66,13 @@ def generate_shap_artifacts(
     return artifacts
 
 
-def serialize_explainer(explainer: shap.TreeExplainer) -> bytes:
-    """Pickle the SHAP explainer for MLflow artifact storage."""
-    return pickle.dumps(explainer)
+def serialize_explainer(explainer: shap.TreeExplainer, path: str | Path) -> None:
+    """Pickle the SHAP explainer to disk for MLflow artifact storage."""
+    with open(path, "wb") as f:
+        pickle.dump(explainer, f)
 
 
-def deserialize_explainer(data: bytes) -> shap.TreeExplainer:
-    """Unpickle the SHAP explainer from MLflow artifact."""
-    return pickle.loads(data)
+def deserialize_explainer(path: str | Path) -> shap.TreeExplainer:
+    """Load a pickled SHAP explainer from disk."""
+    with open(path, "rb") as f:
+        return pickle.load(f)
