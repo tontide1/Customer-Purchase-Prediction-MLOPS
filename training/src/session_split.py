@@ -6,26 +6,13 @@ import argparse
 from pathlib import Path
 
 import polars as pl
-import pyarrow.dataset as ds
-import pyarrow.parquet as pq
 
 from shared import constants
+from shared.parquet import read_parquet_dataset
 from training.src.config import Config
 
-
-def _read_silver_dataset(path: str | Path) -> pl.DataFrame:
-    silver_path = Path(path)
-    if not silver_path.exists():
-        raise FileNotFoundError(f"Silver parquet not found: {path}")
-    if silver_path.is_file():
-        table = pq.read_table(silver_path)
-    else:
-        table = ds.dataset(silver_path, format="parquet").to_table()
-    return pl.from_arrow(table)
-
-
 def build_session_split_map(silver_path: str | Path, output_path: str | Path) -> None:
-    df = _read_silver_dataset(silver_path)
+    df = read_parquet_dataset(silver_path)
     if df.is_empty():
         raise ValueError("silver input is empty")
 

@@ -22,6 +22,7 @@ import pyarrow.dataset as ds
 import pyarrow.parquet as pq
 
 from shared import constants, schemas
+from shared.parquet import iter_parquet_batches, read_parquet_dataset
 from training.src.config import Config
 
 logging.basicConfig(
@@ -135,15 +136,8 @@ def read_bronze_parquet(bronze_path: str) -> pl.DataFrame:
     """
     bronze_path_p = Path(bronze_path)
 
-    if not bronze_path_p.exists():
-        raise FileNotFoundError(f"Bronze parquet not found: {bronze_path}")
-
     logger.info(f"Reading bronze artifact: {bronze_path_p}")
-    if bronze_path_p.is_file():
-        table = pq.read_table(bronze_path_p)
-    else:
-        table = ds.dataset(bronze_path_p, format="parquet").to_table()
-    df = pl.from_arrow(table)
+    df = read_parquet_dataset(bronze_path_p)
     logger.info(f"  ✓ Read {df.height} rows")
 
     return df
@@ -163,21 +157,11 @@ def iter_bronze_batches(
     Yields:
         PyArrow record batches
     """
-    bronze_path_p = Path(bronze_path)
-
-    if not bronze_path_p.exists():
-        raise FileNotFoundError(f"Bronze parquet not found: {bronze_path}")
     if batch_size <= 0:
         raise ValueError("batch_size must be > 0")
 
-    logger.info(f"Reading bronze artifact in batches: {bronze_path_p}")
-    if bronze_path_p.is_file():
-        parquet_file = pq.ParquetFile(bronze_path_p)
-        yield from parquet_file.iter_batches(batch_size=batch_size)
-        return
-
-    dataset = ds.dataset(bronze_path_p, format="parquet")
-    yield from dataset.to_batches(batch_size=batch_size)
+    logger.info(f"Reading bronze artifact in batches: {bronze_path}")
+    yield from iter_parquet_batches(bronze_path, batch_size=batch_size)
 
 
 def enforce_silver_dtypes(df: pl.DataFrame) -> pl.DataFrame:
