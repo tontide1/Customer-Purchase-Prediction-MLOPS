@@ -15,19 +15,22 @@ def binary_predictions():
 
 
 def test_compute_metrics_structure(binary_predictions):
-    """Test that compute_metrics returns all required fields."""
+    """Test that compute_metrics returns tuple: (metrics_dict, threshold)."""
     y_true, y_pred = binary_predictions
-    metrics = compute_metrics(y_true, y_pred)
+    metrics, threshold = compute_metrics(y_true, y_pred)
 
-    required_keys = ["pr_auc", "f1", "precision", "recall", "confusion_matrix"]
+    required_keys = ["pr_auc", "f1", "precision", "recall", "confusion_matrix", "optimal_threshold"]
     for key in required_keys:
         assert key in metrics, f"Missing key: {key}"
+    
+    assert isinstance(threshold, (float, np.floating)), "Returned threshold should be float"
+    assert metrics["optimal_threshold"] == threshold, "optimal_threshold in dict should match returned threshold"
 
 
 def test_pr_auc_in_valid_range(binary_predictions):
     """Test that PR-AUC is between 0 and 1."""
     y_true, y_pred = binary_predictions
-    metrics = compute_metrics(y_true, y_pred)
+    metrics, _ = compute_metrics(y_true, y_pred)
 
     assert 0.0 <= metrics["pr_auc"] <= 1.0
 
@@ -44,7 +47,7 @@ def test_compute_optimal_threshold(binary_predictions):
 def test_confusion_matrix_format(binary_predictions):
     """Test that confusion matrix has correct structure."""
     y_true, y_pred = binary_predictions
-    metrics = compute_metrics(y_true, y_pred)
+    metrics, _ = compute_metrics(y_true, y_pred)
     cm = metrics["confusion_matrix"]
 
     assert cm.shape == (2, 2), "Confusion matrix should be 2x2"

@@ -11,7 +11,7 @@ from sklearn.metrics import (
 )
 
 
-def compute_metrics(y_true: np.ndarray, y_pred_proba: np.ndarray) -> dict:
+def compute_metrics(y_true: np.ndarray, y_pred_proba: np.ndarray) -> tuple[dict, float]:
     """
     Compute binary classification metrics.
 
@@ -20,7 +20,8 @@ def compute_metrics(y_true: np.ndarray, y_pred_proba: np.ndarray) -> dict:
         y_pred_proba: Predicted probabilities for class 1
 
     Returns:
-        Dictionary with keys: pr_auc, f1, precision, recall, confusion_matrix
+        Tuple of (metrics_dict, optimal_threshold) where metrics_dict contains:
+        pr_auc, f1, precision, recall, confusion_matrix, optimal_threshold
     """
     precision_vals, recall_vals, _ = precision_recall_curve(y_true, y_pred_proba)
     pr_auc = auc(recall_vals, precision_vals)
@@ -28,13 +29,16 @@ def compute_metrics(y_true: np.ndarray, y_pred_proba: np.ndarray) -> dict:
     threshold = compute_optimal_threshold(y_true, y_pred_proba)
     y_pred = (y_pred_proba >= threshold).astype(int)
 
-    return {
+    metrics = {
         "pr_auc": float(pr_auc),
         "f1": float(f1_score(y_true, y_pred)),
         "precision": float(precision_score(y_true, y_pred, zero_division=0)),
         "recall": float(recall_score(y_true, y_pred, zero_division=0)),
         "confusion_matrix": confusion_matrix(y_true, y_pred),
+        "optimal_threshold": float(threshold),
     }
+
+    return metrics, threshold
 
 
 def compute_optimal_threshold(y_true: np.ndarray, y_pred_proba: np.ndarray) -> float:
