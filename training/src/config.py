@@ -65,6 +65,27 @@ class Config:
     # These are typically set via `dvc remote add` and stored in .dvc/config
     # This class provides defaults for initialization only.
 
+    # ========================================================================
+    # MLflow Configuration (Sprint 2b)
+    # ========================================================================
+    MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
+    MLFLOW_EXPERIMENT_NAME = "sprint2b_training"
+    MLFLOW_ARTIFACT_PATH = "models"
+
+    # ========================================================================
+    # Optuna Configuration (Sprint 2b)
+    # ========================================================================
+    OPTUNA_SMOKE_TRIALS = 3  # Fast local iteration
+    OPTUNA_TARGET_TRIALS = 50  # Full target budget
+    OPTUNA_TIMEOUT_SECONDS = 3600  # 1 hour timeout per trial
+
+    # ========================================================================
+    # Training Configuration (Sprint 2b)
+    # ========================================================================
+    MIN_VALIDATION_PR_AUC_THRESHOLD = 0.5
+    TEST_SAMPLE_SIZE = 500  # For quick validation during dev
+    SMOKE_MODE_ENABLED = True  # Switch to False for full training
+
     @classmethod
     def validate(cls) -> bool:
         """
