@@ -71,7 +71,7 @@ training/tests/test_train.py ............... 3 passed
 1. **Task 3 config.py**: All constants made env-aware via `os.getenv()` (plan had hardcoded values). All 9 constants added to `get_all_settings()` (not in plan).
 2. **Task 4 evaluate.py**: `compute_metrics()` returns `tuple[dict, float]` not just `dict` (spec fix — required by describe).
 3. **Task 5 model_validation.py**: 9 tests instead of 6 (added edge cases: equal to prod, between threshold and prod, 3 override error cases).
-4. **Task 8 train.py**: Target column is `label` (matches GOLD_SCHEMA), not `target_purchase` (plan error). LightGBM uses only `scale_pos_weight` (not `is_unbalance`) to avoid v4.x conflict. MLflow logging uses model-specific `log_model` (xgb/lgb/sklearn).
+4. **Task 8 train.py**: Training currently uses target column `target_purchase`, not `label`. LightGBM uses only `scale_pos_weight` (not `is_unbalance`) to avoid v4.x conflict. MLflow logging currently routes all models through `mlflow.sklearn.log_model` rather than model-specific `log_model` helpers.
 5. **Task 9.5 (EXTRA)**: Gold streaming refactor — not in original plan, added to fix OOM on 42M rows. Replaced global `rows_by_split` dict accumulation with per-bucket `ParquetWriter` streaming.
 
 ## Integration Status
