@@ -450,7 +450,11 @@ def write_bronze_parquet_chunked(
     Write bronze artifact from raw CSVs using chunked streaming + ParquetWriter.
     """
     output_path_p = Path(output_path)
-    output_path_p.parent.mkdir(parents=True, exist_ok=True)
+    is_file_target = output_path_p.suffix == ".parquet"
+    if is_file_target:
+        output_path_p.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        output_path_p.mkdir(parents=True, exist_ok=True)
 
     writer = None
     total_rows_in = 0
@@ -492,15 +496,20 @@ def write_bronze_parquet_chunked(
                 logger.error(f"  Failed to convert chunk {chunk_count} to Arrow: {e}")
                 raise
 
-            if writer is None:
-                writer = pq.ParquetWriter(
-                    output_path_p,
-                    schema=schemas.BRONZE_SCHEMA,
-                    compression="snappy",
-                )
-                logger.info(f"Initialized ParquetWriter: {output_path_p}")
+            if is_file_target:
+                if writer is None:
+                    writer = pq.ParquetWriter(
+                        output_path_p,
+                        schema=schemas.BRONZE_SCHEMA,
+                        compression="snappy",
+                    )
+                    logger.info(f"Initialized ParquetWriter: {output_path_p}")
 
-            writer.write_table(table)
+                writer.write_table(table)
+            else:
+                part_path = output_path_p / f"part-{chunk_count - 1:05d}.parquet"
+                pq.write_table(table, part_path, compression="snappy")
+                logger.info(f"Wrote bronze parquet part: {part_path}")
 
             if memory_log:
                 elapsed = time.time() - start_time
@@ -542,9 +551,13 @@ def write_bronze_parquet_chunked(
 def write_bronze_parquet(df: pl.DataFrame, output_path: str) -> None:
     """Write single Polars bronze frame to Parquet."""
     output_path_p = Path(output_path)
-    output_path_p.parent.mkdir(parents=True, exist_ok=True)
     table = bronze_polars_to_arrow_table(finalize_bronze_polars_dtypes(df))
-    pq.write_table(table, output_path_p, compression="snappy")
+    if output_path_p.suffix == ".parquet":
+        output_path_p.parent.mkdir(parents=True, exist_ok=True)
+        pq.write_table(table, output_path_p, compression="snappy")
+    else:
+        output_path_p.mkdir(parents=True, exist_ok=True)
+        pq.write_table(table, output_path_p / "part-00000.parquet", compression="snappy")
     logger.info(f"✓ Wrote bronze artifact: {output_path_p}")
 
 

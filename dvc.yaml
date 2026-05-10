@@ -1,11 +1,9 @@
-# Week 1: Data Foundation Pipeline
-# This dvc.yaml includes only stages that can be executed in Week 1.
-# Week 2+ stages (session_split, gold, train, etc.) are postponed until their dependencies are ready.
+# Week 2 Sprint 2a: Offline Data Foundation Pipeline
 
 stages:
   bronze:
     desc: "Transform raw CSV to bronze parquet (event_time → source_event_time)"
-    cmd: python -m training.src.bronze --input data/train_raw --output data/bronze/events.parquet
+    cmd: python -m training.src.bronze --input data/train_raw --output data/bronze
     deps:
       - training/src/bronze.py
       - training/src/config.py
@@ -13,18 +11,54 @@ stages:
       - shared/schemas.py
       - data/train_raw
     outs:
-      - data/bronze/events.parquet:
-          desc: "Validated, immutable bronze artifact with source_event_time"
+      - data/bronze:
+          desc: "Validated, immutable bronze parquet dataset"
 
   silver:
     desc: "Clean, deduplicate, and sort bronze data to silver parquet"
-    cmd: python -m training.src.silver --input data/bronze/events.parquet --output data/silver/events.parquet
+    cmd: python -m training.src.silver --input data/bronze --output data/silver
     deps:
       - training/src/silver.py
       - training/src/config.py
+      - training/src/features.py
+      - training/src/session_split.py
+      - training/src/gold.py
       - shared/constants.py
       - shared/schemas.py
-      - data/bronze/events.parquet
+      - data/bronze
     outs:
-      - data/silver/events.parquet:
-          desc: "Clean, deduplicated, deterministically sorted data"
+      - data/silver:
+          desc: "Clean, deduplicated, deterministically sorted parquet dataset"
+
+  session_split:
+    desc: "Build a deterministic session split map from silver"
+    cmd: python -m training.src.session_split --input data/silver --output data/gold/session_split_map.parquet
+    deps:
+      - training/src/session_split.py
+      - training/src/config.py
+      - shared/constants.py
+      - shared/schemas.py
+      - data/silver
+    outs:
+      - data/gold/session_split_map.parquet:
+          desc: "Session-level train/val/test split map"
+
+  gold:
+    desc: "Materialize per-event gold snapshots"
+    cmd: python -m training.src.gold --input data/silver --split-map data/gold/session_split_map.parquet --output data/gold
+    deps:
+      - training/src/gold.py
+      - training/src/features.py
+      - training/src/config.py
+      - training/src/session_split.py
+      - shared/constants.py
+      - shared/schemas.py
+      - data/silver
+      - data/gold/session_split_map.parquet
+    outs:
+      - data/gold/train.parquet:
+          desc: "Train gold snapshots"
+      - data/gold/val.parquet:
+          desc: "Validation gold snapshots"
+      - data/gold/test.parquet:
+          desc: "Test gold snapshots"

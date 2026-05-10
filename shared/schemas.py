@@ -70,6 +70,32 @@ SILVER_SCHEMA = pa.schema(
     ]
 )
 
+# ============================================================================
+# Gold Layer Schema
+# ============================================================================
+
+GOLD_SCHEMA = pa.schema(
+    [
+        (constants.FIELD_SOURCE_EVENT_TIME, pa.timestamp("us")),
+        (constants.FIELD_CATEGORY_ID, pa.string()),
+        ("user_session", pa.string()),
+        ("user_id", pa.string()),
+        ("event_type", pa.string()),
+        ("product_id", pa.string()),
+        ("category_code", pa.string()),
+        ("brand", pa.string()),
+        ("price", pa.float64()),
+        ("total_views", pa.int64()),
+        ("total_carts", pa.int64()),
+        ("net_cart_count", pa.int64()),
+        ("cart_to_view_ratio", pa.float64()),
+        ("unique_categories", pa.int64()),
+        ("unique_products", pa.int64()),
+        ("session_duration_sec", pa.float64()),
+        ("label", pa.int8()),
+    ]
+)
+
 
 def get_raw_fields() -> set:
     """Return set of field names in raw schema."""
@@ -84,3 +110,8 @@ def get_bronze_fields() -> set:
 def get_silver_fields() -> set:
     """Return set of field names in silver schema."""
     return {field.name for field in SILVER_SCHEMA}
+
+
+def get_gold_fields() -> set:
+    """Return set of field names in gold schema."""
+    return {field.name for field in GOLD_SCHEMA}
