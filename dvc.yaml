@@ -3,7 +3,7 @@
 stages:
   bronze:
     desc: "Transform raw CSV to bronze parquet (event_time → source_event_time)"
-    cmd: python -m training.src.bronze --input data/train_raw --output data/bronze
+    cmd: python -m training.src.bronze --input data/train_raw --output data/bronze/events.parquet
     deps:
       - training/src/bronze.py
       - training/src/config.py
@@ -11,12 +11,12 @@ stages:
       - shared/schemas.py
       - data/train_raw
     outs:
-      - data/bronze:
+      - data/bronze/events.parquet:
           desc: "Validated, immutable bronze parquet dataset"
 
   silver:
     desc: "Clean, deduplicate, and sort bronze data to silver parquet"
-    cmd: python -m training.src.silver --input data/bronze --output data/silver
+    cmd: python -m training.src.silver --input data/bronze/events.parquet --output data/silver
     deps:
       - training/src/silver.py
       - training/src/config.py
@@ -25,7 +25,7 @@ stages:
       - training/src/gold.py
       - shared/constants.py
       - shared/schemas.py
-      - data/bronze
+      - data/bronze/events.parquet
     outs:
       - data/silver:
           desc: "Clean, deduplicated, deterministically sorted parquet dataset"

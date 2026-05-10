@@ -148,8 +148,9 @@ def build_gold_snapshots(
         snapshots_list = _session_snapshots(session_df.drop("split"))
 
         if snapshots_list:
-            table = pl.DataFrame(snapshots_list).select(schema.names).to_arrow()
-            writers[split].write_table(table.cast(schema))
+            data = {name: [s[name] for s in snapshots_list] for name in schema.names}
+            table = pa.Table.from_pydict(data, schema=schema)
+            writers[split].write_table(table)
             split_counts[split] += len(snapshots_list)
             split_written[split] = True
 
@@ -161,7 +162,7 @@ def build_gold_snapshots(
 
     for split in ("train", "val", "test"):
         if not split_written[split]:
-            writers[split].write_table(pa.Table.from_batches([], schema=schema).cast(schema))
+            writers[split].write_table(pa.Table.from_batches([], schema=schema))
             logger.warning("Split '%s' has zero rows (no sessions assigned)", split)
         writers[split].close()
 

@@ -40,7 +40,7 @@ def _make_split_map(tmp_path, mapping):
 
 
 def _ts(s: str) -> datetime:
-    return datetime.fromisoformat(s).replace(tzinfo=timezone.utc)
+    return datetime.fromisoformat(s)
 
 
 def test_streaming_gold_basic(tmp_path):
