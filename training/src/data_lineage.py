@@ -4,7 +4,7 @@ import hashlib
 import os
 from pathlib import Path
 from typing import Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def compute_manifest_hash(data_path: str) -> str:
@@ -45,9 +45,10 @@ def gather_lineage_metadata(
     Returns:
         Dictionary of lineage metadata
     """
+    gold_root = os.path.dirname(os.path.abspath(train_path))
     return {
-        "raw_input_manifest_hash": compute_manifest_hash("data/gold"),
-        "raw_input_file_count": len(list(Path("data/gold").glob("*.parquet"))),
+        "raw_input_manifest_hash": compute_manifest_hash(gold_root),
+        "raw_input_file_count": len(list(Path(gold_root).glob("*.parquet"))),
         "window_start_utc": window_start_utc or "",
         "window_end_utc": window_end_utc or "",
         "row_count_gold_train": _count_rows(train_path),
@@ -58,7 +59,7 @@ def gather_lineage_metadata(
         "input_val_path": os.path.abspath(val_path),
         "input_test_path": os.path.abspath(test_path),
         "input_session_split_map_path": os.path.abspath(session_split_map_path),
-        "metadata_timestamp_utc": datetime.utcnow().isoformat() + "Z",
+        "metadata_timestamp_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
 
 
