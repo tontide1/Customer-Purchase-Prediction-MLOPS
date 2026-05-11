@@ -3,7 +3,7 @@
 stages:
   bronze:
     desc: "Transform raw CSV to bronze parquet (event_time → source_event_time)"
-    cmd: python -m training.src.bronze --input data/train_raw --output data/bronze
+    cmd: python -m training.src.bronze --input data/train_raw --output data/bronze/events.parquet
     deps:
       - training/src/bronze.py
       - training/src/config.py
@@ -11,12 +11,12 @@ stages:
       - shared/schemas.py
       - data/train_raw
     outs:
-      - data/bronze:
+      - data/bronze/events.parquet:
           desc: "Validated, immutable bronze parquet dataset"
 
   silver:
     desc: "Clean, deduplicate, and sort bronze data to silver parquet"
-    cmd: python -m training.src.silver --input data/bronze --output data/silver
+    cmd: python -m training.src.silver --input data/bronze/events.parquet --output data/silver
     deps:
       - training/src/silver.py
       - training/src/config.py
@@ -25,7 +25,7 @@ stages:
       - training/src/gold.py
       - shared/constants.py
       - shared/schemas.py
-      - data/bronze
+      - data/bronze/events.parquet
     outs:
       - data/silver:
           desc: "Clean, deduplicated, deterministically sorted parquet dataset"
@@ -62,3 +62,23 @@ stages:
           desc: "Validation gold snapshots"
       - data/gold/test.parquet:
           desc: "Test gold snapshots"
+
+  train:
+    desc: "Train three models, select winner by validation PR-AUC, validate against production"
+    cmd: python -m training.src.train --train data/gold/train.parquet --val data/gold/val.parquet --test data/gold/test.parquet --session-split-map data/gold/session_split_map.parquet
+    deps:
+      - training/src/train.py
+      - training/src/evaluate.py
+      - training/src/model_validation.py
+      - training/src/explainability.py
+      - training/src/data_lineage.py
+      - training/src/config.py
+      - shared/constants.py
+      - shared/schemas.py
+      - data/gold/train.parquet
+      - data/gold/val.parquet
+      - data/gold/test.parquet
+      - data/gold/session_split_map.parquet
+    outs:
+      - mlruns:
+          desc: "MLflow experiment tracking directory (local)"

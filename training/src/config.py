@@ -65,6 +65,27 @@ class Config:
     # These are typically set via `dvc remote add` and stored in .dvc/config
     # This class provides defaults for initialization only.
 
+    # ========================================================================
+    # MLflow Configuration (Sprint 2b)
+    # ========================================================================
+    MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
+    MLFLOW_EXPERIMENT_NAME = os.getenv("MLFLOW_EXPERIMENT_NAME", "sprint2b_training")
+    MLFLOW_ARTIFACT_PATH = os.getenv("MLFLOW_ARTIFACT_PATH", "models")
+
+    # ========================================================================
+    # Optuna Configuration (Sprint 2b)
+    # ========================================================================
+    OPTUNA_SMOKE_TRIALS = int(os.getenv("OPTUNA_SMOKE_TRIALS", "3"))
+    OPTUNA_TARGET_TRIALS = int(os.getenv("OPTUNA_TARGET_TRIALS", "50"))
+    OPTUNA_TIMEOUT_SECONDS = int(os.getenv("OPTUNA_TIMEOUT_SECONDS", "3600"))
+
+    # ========================================================================
+    # Training Configuration (Sprint 2b)
+    # ========================================================================
+    MIN_VALIDATION_PR_AUC_THRESHOLD = float(os.getenv("MIN_VALIDATION_PR_AUC_THRESHOLD", "0.5"))
+    TEST_SAMPLE_SIZE = int(os.getenv("TEST_SAMPLE_SIZE", "500"))
+    SMOKE_MODE_ENABLED = os.getenv("SMOKE_MODE_ENABLED", "true").lower() == "true"
+
     @classmethod
     def validate(cls) -> bool:
         """
@@ -110,6 +131,15 @@ class Config:
             "dvc_remote_url": cls.DVC_REMOTE_URL,
             "minio_endpoint": cls.MINIO_ENDPOINT,
             "minio_bucket": cls.MINIO_BUCKET,
+            "mlflow_tracking_uri": cls.MLFLOW_TRACKING_URI,
+            "mlflow_experiment_name": cls.MLFLOW_EXPERIMENT_NAME,
+            "mlflow_artifact_path": cls.MLFLOW_ARTIFACT_PATH,
+            "optuna_smoke_trials": cls.OPTUNA_SMOKE_TRIALS,
+            "optuna_target_trials": cls.OPTUNA_TARGET_TRIALS,
+            "optuna_timeout_seconds": cls.OPTUNA_TIMEOUT_SECONDS,
+            "min_validation_pr_auc_threshold": cls.MIN_VALIDATION_PR_AUC_THRESHOLD,
+            "test_sample_size": cls.TEST_SAMPLE_SIZE,
+            "smoke_mode_enabled": cls.SMOKE_MODE_ENABLED,
         }
 
 

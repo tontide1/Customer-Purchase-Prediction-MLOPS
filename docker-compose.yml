@@ -39,8 +39,24 @@ services:
     networks:
       - mlops_net
 
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    container_name: mlflow
+    command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:////mlflow/mlflow.db --default-artifact-root /mlflow/artifacts
+    environment:
+      MLFLOW_BACKEND_STORE_URI: sqlite:////mlflow/mlflow.db
+      MLFLOW_DEFAULT_ARTIFACT_ROOT: /mlflow/artifacts
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow_backend:/mlflow
+    restart: unless-stopped
+    networks:
+      - mlops_net
+
 volumes:
   minio_data:
+  mlflow_backend:
 
 networks:
   mlops_net:
