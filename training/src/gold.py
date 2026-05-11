@@ -143,28 +143,31 @@ def build_gold_snapshots(
     total_sessions = 0
     split_counts: dict[str, int] = {"train": 0, "val": 0, "test": 0}
 
-    for (_session_id,), session_df in silver.group_by("user_session", maintain_order=True):
-        split = session_df["split"][0]
-        snapshots_list = _session_snapshots(session_df.drop("split"))
+    try:
+        for (_session_id,), session_df in silver.group_by("user_session", maintain_order=True):
+            split = session_df["split"][0]
+            snapshots_list = _session_snapshots(session_df.drop("split"))
 
-        if snapshots_list:
-            data = {name: [s[name] for s in snapshots_list] for name in schema.names}
-            table = pa.Table.from_pydict(data, schema=schema)
-            writers[split].write_table(table)
-            split_counts[split] += len(snapshots_list)
-            split_written[split] = True
+            if snapshots_list:
+                data = {name: [s[name] for s in snapshots_list] for name in schema.names}
+                table = pa.Table.from_pydict(data, schema=schema)
+                writers[split].write_table(table)
+                split_counts[split] += len(snapshots_list)
+                split_written[split] = True
 
-        total_sessions += 1
-        if total_sessions % 100_000 == 0:
-            logger.info("Processed %d sessions...", total_sessions)
+            total_sessions += 1
+            if total_sessions % 100_000 == 0:
+                logger.info("Processed %d sessions...", total_sessions)
 
-    logger.info("Processed %d total sessions", total_sessions)
+        logger.info("Processed %d total sessions", total_sessions)
 
-    for split in ("train", "val", "test"):
-        if not split_written[split]:
-            writers[split].write_table(pa.Table.from_batches([], schema=schema))
-            logger.warning("Split '%s' has zero rows (no sessions assigned)", split)
-        writers[split].close()
+        for split in ("train", "val", "test"):
+            if not split_written[split]:
+                writers[split].write_table(pa.Table.from_batches([], schema=schema))
+                logger.warning("Split '%s' has zero rows (no sessions assigned)", split)
+    finally:
+        for split in ("train", "val", "test"):
+            writers[split].close()
 
     logger.info(
         "Gold data written: train=%d, val=%d, test=%d rows",
