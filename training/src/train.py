@@ -67,7 +67,7 @@ def build_train_matrix(
     """
     train_df, val_df, _ = load_gold_data(train_path, val_path, train_path)
 
-    target_col = "target_purchase"
+    target_col = "label"
     feature_cols = [col for col in train_df.columns if col != target_col]
 
     feature_cols = [col for col in feature_cols if col not in

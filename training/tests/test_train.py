@@ -24,7 +24,7 @@ def gold_data(tmp_path):
         "event_type": ["view", "click", "purchase", "add_to_cart"] * (n_samples // 4),
         "product_id": ["prod_" + str(i % 20) for i in range(n_samples)],
         "price": np.random.rand(n_samples) * 100,
-        "target_purchase": np.random.randint(0, 2, n_samples),
+        "label": np.random.randint(0, 2, n_samples),
     }
 
     df = pd.DataFrame(data)
