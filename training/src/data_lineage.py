@@ -8,17 +8,17 @@ from datetime import datetime
 
 
 def compute_manifest_hash(data_path: str) -> str:
-    """Compute hash of all files in data directory."""
-    file_hashes = []
-    for f in sorted(Path(data_path).rglob("*.parquet")):
-        hasher = hashlib.md5()
-        with open(f, "rb") as fp:
-            while chunk := fp.read(8192):
-                hasher.update(chunk)
-        file_hashes.append(hasher.hexdigest())
+    """Compute a lightweight manifest hash of parquet files in a data directory."""
+    base_path = Path(data_path)
+    manifest_hasher = hashlib.md5()
 
-    combined = "".join(file_hashes)
-    return hashlib.md5(combined.encode()).hexdigest()
+    for f in sorted(base_path.rglob("*.parquet")):
+        stat = f.stat()
+        relative_path = f.relative_to(base_path).as_posix()
+        manifest_entry = f"{relative_path}|{stat.st_size}|{stat.st_mtime_ns}\n"
+        manifest_hasher.update(manifest_entry.encode("utf-8"))
+
+    return manifest_hasher.hexdigest()
 
 
 def gather_lineage_metadata(
