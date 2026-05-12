@@ -43,4 +43,4 @@ def test_build_gold_snapshots_rejects_unknown_split(tmp_path) -> None:
     pq.write_table(split_map_df.to_arrow(), split_map_path)
 
     with pytest.raises(ValueError, match="Unexpected split value: holdout"):
-        build_gold_snapshots(silver_path, split_map_path, tmp_path / "gold")
+        build_gold_snapshots(silver_path, split_map_path, tmp_path / "gold", batch_size=2)
