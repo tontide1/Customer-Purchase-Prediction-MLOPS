@@ -34,6 +34,10 @@ class Config:
     DATA_WINDOW_PROFILE = os.getenv("DATA_WINDOW_PROFILE", "training")
     TRAINING_WINDOW_START = os.getenv("TRAINING_WINDOW_START", "2019-10")
     TRAINING_WINDOW_END = os.getenv("TRAINING_WINDOW_END", "2019-10")
+    TRAINING_SESSION_CUTOFF = os.getenv(
+        "TRAINING_SESSION_CUTOFF", "2019-10-16T00:00:00"
+    )
+    GOLD_BATCH_SIZE = int(os.getenv("GOLD_BATCH_SIZE", "50000"))
     DEV_SMOKE_WINDOW_START = os.getenv("DEV_SMOKE_WINDOW_START", "2019-10")
     DEV_SMOKE_WINDOW_END = os.getenv("DEV_SMOKE_WINDOW_END", "2019-10")
     REPLAY_WINDOW_START = os.getenv("REPLAY_WINDOW_START", "2019-11")
@@ -122,6 +126,8 @@ class Config:
             "data_window_profile": cls.DATA_WINDOW_PROFILE,
             "training_window_start": cls.TRAINING_WINDOW_START,
             "training_window_end": cls.TRAINING_WINDOW_END,
+            "training_session_cutoff": cls.TRAINING_SESSION_CUTOFF,
+            "gold_batch_size": cls.GOLD_BATCH_SIZE,
             "dev_smoke_window_start": cls.DEV_SMOKE_WINDOW_START,
             "dev_smoke_window_end": cls.DEV_SMOKE_WINDOW_END,
             "replay_window_start": cls.REPLAY_WINDOW_START,
