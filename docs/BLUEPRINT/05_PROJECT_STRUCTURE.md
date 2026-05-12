@@ -4,9 +4,9 @@
 > **→ Xem [6. Error Handling](06_ERROR_HANDLING.md)**
 
 > **Execution profile (local dev): `DEV_SMOKE`**
-> - Train window (dev): `2019-10` -> `2019-10`
+> - Train window (dev): first half of `2019-10` (`session_start_time < 2019-10-16T00:00:00`)
 > - Replay window (dev): `2019-11` -> `2019-11`
-> - Project contract hiện tại: `2019-Oct.csv.gz` cho baseline training, `2019-Nov.csv.gz` cho replay.
+> - Project contract hiện tại: `2019-Oct.csv.gz` cho baseline training ở first half of October, `2019-Nov.csv.gz` cho replay.
 
 ## 5.1. Repository Layout - TARGET STATE
 
@@ -74,8 +74,8 @@ REAL-TIME-ECOMMERCE-INTENT-SYSTEM/
 │   │   ├── train.py                # Main training script
 │   │   ├── bronze.py               # Raw pool -> bronze parquet dataset
 │   │   ├── silver.py               # Bronze dataset -> silver cleaned dataset
-│   │   ├── session_split.py        # Silver -> session-boundary split map
-│   │   ├── gold.py                 # Silver + split map -> gold snapshots
+│   │   ├── session_split.py        # Silver -> session-boundary split map (reproducibility artifact)
+│   │   ├── gold.py                 # Stream sorted silver snapshots -> gold snapshots
 │   │   ├── features.py             # Feature engineering logic
 │   │   ├── evaluate.py             # Evaluation metrics
 │   │   ├── explainability.py       # SHAP analysis + save explainer
@@ -184,8 +184,8 @@ REAL-TIME-ECOMMERCE-INTENT-SYSTEM/
 | **Model Experiments** | (không có) | `notebook-planned/03_model_experiment.ipynb` | So sánh XGBoost vs LightGBM vs Random Forest |
 | **Bronze Artifacts** | (không có) | `data/bronze/` | Dataset directory cho parquet bronze, có thể partition theo file/tháng |
 | **Silver Artifacts** | (không có) | `data/silver/` | Dataset directory cho parquet silver, phục vụ session indexing |
-| **Gold Artifacts** | (không có) | `data/gold/train_snapshots.parquet` | Output của `training/src/gold.py` |
-| **Split Mapping** | (không có) | `data/gold/session_split_map.parquet` | Reproducibility artifact downstream; không phải source of truth cho session mới |
+| **Gold Artifacts** | (không có) | `data/gold/train_snapshots.parquet` | Output của `training/src/gold.py`, stream snapshots từ silver đã sort sẵn |
+| **Split Mapping** | (không có) | `data/gold/session_split_map.parquet` | Downstream reproducibility artifact; không phải source of truth cho session mới |
 
 ---
 

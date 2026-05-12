@@ -4,7 +4,7 @@
 > **→ Xem [3. Features](03_FEATURES.md)**
 
 > **Execution profile (local dev): `DEV_SMOKE`**
-> - Train window (dev): `2019-10` -> `2019-10`
+> - Train window (dev): first half of `2019-10` (`session_start_time < 2019-10-16T00:00:00`)
 > - Replay window (dev): `2019-11` -> `2019-11`
 > - Profile này chỉ để tăng tốc vòng lặp phát triển; canonical target-state windows trong blueprint vẫn giữ nguyên.
 
@@ -59,7 +59,7 @@ Hệ thống hoạt động theo mô hình **Event-Driven Microservices**, chia 
 * **Data Replayer (Simulator):** Đọc replay window `2019-Nov.csv.gz` từ replay/simulation raw source → Validate schema → Sinh deterministic `event_id` → Gắn `source=kaggle` → Gửi event vào Kafka topic `raw_events`.
   * **Event ID Generation (canonical):** `event_id = hash(f"{user_session}|{source_event_time}|{event_type}|{product_id}|{user_id}")` — deterministic để đảm bảo deduplication hoạt động đúng.
   * **Timestamp Contract:** Dữ liệu CSV giữ nguyên `source_event_time` để đảm bảo reproducibility. Simulator chỉ gắn thêm `replay_time` khi bắn event vào Kafka. Nếu stream processor cần xử lý theo processing time thì vẫn dùng clock hiện tại của worker, nhưng không được làm mất timestamp gốc.
-  * **Usage Window Note:** Replay/demo là usage window `2019-11` và phải được giữ tách biệt với baseline training window `2019-10`.
+  * **Usage Window Note:** Replay/demo là usage window `2019-11` và phải được giữ tách biệt với baseline training window first half of `2019-10` (`session_start_time < 2019-10-16T00:00:00`).
 * **User App (Streamlit):** Giao diện demo cho phép người demo chèn hành động thủ công vào luồng dữ liệu.
   * **Manual Event Contract:** Gắn `source = "manual"`, `source_event_time = replay_time_now` (không giả làm historical replay).
   * **Configurable:** Late event threshold (default 60 giây) có thể config qua `.env`.

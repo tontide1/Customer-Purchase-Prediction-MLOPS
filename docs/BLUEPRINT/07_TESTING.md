@@ -4,7 +4,7 @@
 > **→ Xem [8. Security](08_SECURITY.md)**
 
 > **Execution profile (local dev): `DEV_SMOKE`**
-> - Train window (dev): `2019-10` -> `2019-10`
+> - Train window (dev): first half of `2019-10` (`session_start_time < 2019-10-16T00:00:00`)
 > - Replay window (dev): `2019-11` -> `2019-11`
 > - Profile này chỉ để tăng tốc vòng lặp phát triển; canonical target-state windows trong blueprint vẫn giữ nguyên.
 
@@ -27,9 +27,12 @@
 * **Bronze Row-Count Parity:** Test tổng số dòng valid/rejected sau bronze vẫn đúng khi input trải trên nhiều raw files.
 * **Multi-File Timestamp Preservation:** Test nhiều raw files vẫn preserve đúng `source_event_time` sau bronze materialization.
 * **Cross-Month Session Boundary:** Test session kéo qua ranh giới tháng vẫn được giữ nguyên một `user_session` logic ở downstream split stage.
+* **Cutoff Filtering:** Test baseline training chỉ giữ sessions có `session_start_time < 2019-10-16T00:00:00`.
+* **Split Map Ordering:** Test `session_split_map.parquet` được sort theo `user_session` trước khi persist.
 * **Split Map Disjointness:** Test `session_split_map.parquet` luôn đảm bảo train/val/test disjoint theo `user_session`.
 * **Window Isolation:** Test training window và replay/demo window không bị trộn dữ liệu.
 * **Materialization Strategy Invariance:** Test thay đổi cách materialize bronze/silver không làm đổi exact counts và downstream labeling semantics.
+* **Gold Batch Continuity:** Test gold session continuity được giữ xuyên qua ranh giới parquet batch boundaries khi stream snapshots từ silver đã sort.
 * **Stale Contract Detection:** Test/lint scan fail nếu docs/config còn reference contract cũ như `data/bronze/events.parquet`, `data/silver/events.parquet`, `raw_data_path`, `bronze_data_path`, `silver_data_path`.
 
 ---

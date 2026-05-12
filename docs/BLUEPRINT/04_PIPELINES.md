@@ -4,9 +4,9 @@
 > **→ Xem [5. Project Structure](05_PROJECT_STRUCTURE.md)**
 
 > **Execution profile (local dev): `DEV_SMOKE`**
-> - Train window (dev): `2019-10` -> `2019-10`
+> - Train window (dev): first half of `2019-10` (`session_start_time < 2019-10-16T00:00:00`)
 > - Replay window (dev): `2019-11` -> `2019-11`
-> - Project contract hiện tại: `2019-Oct.csv.gz` cho baseline training, `2019-Nov.csv.gz` cho replay.
+> - Project contract hiện tại: `2019-Oct.csv.gz` cho baseline training ở first half of October, `2019-Nov.csv.gz` cho replay.
 
 ---
 
@@ -25,16 +25,16 @@ data/raw/*.csv(.gz) -> Window selection -> Bronze ingestion (chunked, partitione
 
 ## Usage Windows Overview
 
-* **Training window:** `2019-10` -> `2019-10`.
+* **Training window:** first half of `2019-10` bằng cutoff `session_start_time < 2019-10-16T00:00:00`.
 * **Replay/demo window:** `2019-11` -> `2019-11`.
-* **DEV_SMOKE window (local dev):** training `2019-10` -> `2019-10`, replay `2019-11` -> `2019-11`.
+* **DEV_SMOKE window (local dev):** training first half of `2019-10`, replay `2019-11` -> `2019-11`.
 * **Retraining window:** export replay events từ PostgreSQL sau 7 ngày rồi re-materialize vào `data/retrain_raw/` trước khi chạy pipeline.
 
 **Chi tiết từng bước:**
 
 1. **Select Training Window:** Chọn usage window cho offline training trong raw source pool `data/raw/`.
-   * Training pipeline mặc định dùng window `2019-10` -> `2019-10`.
-   * Khi iterate local với `DEV_SMOKE`, dùng `2019-10` -> `2019-10`.
+   * Training pipeline mặc định dùng first half of `2019-10` với cutoff `session_start_time < 2019-10-16T00:00:00`.
+   * Khi iterate local với `DEV_SMOKE`, dùng cùng cutoff `session_start_time < 2019-10-16T00:00:00`.
 
 2. **Bronze Ingestion:**
     * Đọc từng file `.csv` hoặc `.csv.gz` trong raw window.
@@ -73,10 +73,10 @@ data/raw/*.csv(.gz) -> Window selection -> Bronze ingestion (chunked, partitione
      * `session_end_time = max(source_event_time)`
    * Split train/val/test theo `session_start_time` của `user_session`.
    * Assert một `user_session` chỉ thuộc đúng một split.
-   * Persist split assignment vào `data/gold/session_split_map.parquet` để reproducibility.
+   * Persist split assignment vào `data/gold/session_split_map.parquet` như downstream reproducibility artifact.
 
 6. **Gold Snapshot Generation & Feature Engineering:**
-    * Materialize snapshot rows từ silver dataset theo split map đã khóa.
+    * Stream snapshot rows từ silver dataset đã được sort sẵn, áp dụng split map đã khóa theo từng `user_session`.
     * Tại mỗi thời điểm `t`, snapshot chỉ dùng các event có `source_event_time <= t`.
     * Label = `1` nếu cùng `user_session` có ít nhất 1 `purchase` trong `(t, t + 10 phút]`, ngược lại `0`.
     * Nếu một session có nhiều `purchase` trong horizon, vẫn chỉ cần tồn tại ít nhất một `purchase` để gán label `1`.
@@ -323,7 +323,7 @@ def calculate_kl_divergence(p: np.ndarray, q: np.ndarray) -> float:
 
 **Lý do:** Đảm bảo mọi retrained model đều có lineage hoàn chỉnh qua data lake artifacts, có thể reproduce hoàn toàn từ source.
 
-**Split policy cho retrain window:** `session_split_map.parquet` chỉ là reproducibility artifact của từng lần train/retrain; source of truth cho split assignment vẫn là session index được build lại từ silver layer của window hiện tại.
+**Split policy cho retrain window:** `session_split_map.parquet` chỉ là downstream reproducibility artifact của từng lần train/retrain; source of truth cho split assignment vẫn là session index được build lại từ silver layer của window hiện tại.
 
 ---
 

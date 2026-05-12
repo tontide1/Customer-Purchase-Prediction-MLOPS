@@ -4,9 +4,9 @@
 > **→ Xem [2. Architecture](02_ARCHITECTURE.md)**
 
 > **Execution profile (local dev): `DEV_SMOKE`**
-> - Train window (dev): `2019-10` -> `2019-10`
+> - Train window (dev): first half of `2019-10` (`session_start_time < 2019-10-16T00:00:00`)
 > - Replay window (dev): `2019-11` -> `2019-11`
-> - Project contract hiện tại: `2019-Oct.csv.gz` cho baseline training, `2019-Nov.csv.gz` cho replay.
+> - Project contract hiện tại: `2019-Oct.csv.gz` cho baseline training ở first half of October, `2019-Nov.csv.gz` cho replay.
 
 ---
 
@@ -36,7 +36,7 @@ trong thời gian thực với độ trễ **< 1 giây**.
 
 ## 2.1. Nguồn dữ liệu
 
-* **Raw source pool:** Dataset gốc có nhiều file tháng, nhưng project contract hiện tại chỉ dùng `2019-Oct.csv.gz` cho baseline training và `2019-Nov.csv.gz` cho Online Simulation / replay.
+* **Raw source pool:** Dataset gốc có nhiều file tháng, nhưng project contract hiện tại dùng `2019-Oct.csv.gz` cho baseline training ở first half of October (`session_start_time < 2019-10-16T00:00:00`) và `2019-Nov.csv.gz` cho Online Simulation / replay.
 * Các file tháng trong raw source pool chỉ là đơn vị lưu trữ/ingestion của nguồn dữ liệu, không phải boundary logic cho split train/val/test.
 * **Các trường quan trọng:** `event_time`, `event_type`, `product_id`, `category_id`, `category_code`, `brand`, `price`, `user_id`, `user_session`.
 * **Quy ước timestamp trong hệ thống:** `event_time` từ Kaggle được preserve thành `source_event_time`; simulator thêm `replay_time`; FastAPI thêm `prediction_time` trong response.
@@ -60,13 +60,13 @@ Toàn bộ 7 file tháng được xem là **một raw source pool chung** trong 
 
 ### Offline Training
 
-* **Training window:** Chọn dữ liệu trong khoảng `2019-10` -> `2019-10` (`2019-Oct.csv.gz`).
-* **DEV_SMOKE override (local dev):** cũng dùng `2019-10` -> `2019-10` để chạy nhanh.
+* **Training window:** Chọn first half của `2019-10` bằng cách giữ các session có `session_start_time < 2019-10-16T00:00:00` từ `2019-Oct.csv.gz`.
+* **DEV_SMOKE override (local dev):** cũng dùng cùng cutoff `session_start_time < 2019-10-16T00:00:00` để chạy nhanh.
 * **Input chuẩn:** Dùng `data/silver/` để build session index và split assignment, sau đó materialize `data/gold/`.
 * **Đơn vị mẫu huấn luyện:** Không phải một dòng cho cả session đã kết thúc, mà là nhiều **snapshot rows** trên cùng `user_session`.
 * **Quy tắc snapshot:** Tại mỗi thời điểm `t`, feature chỉ được tính từ các event có `source_event_time <= t`.
 * **Quy tắc label:** `1` nếu cùng `user_session` có ít nhất 1 event `purchase` trong khoảng `(t, t + 10 phút]`, ngược lại `0`.
-* **Split policy chính thức:** Build session index từ silver layer, sau đó split train/val/test theo `session_start_time` của `user_session`.
+* **Split policy chính thức:** Build session index từ silver layer, sau đó split train/val/test theo `session_start_time` của `user_session` với cutoff `2019-10-16T00:00:00` cho baseline training.
 * **Ràng buộc:** Mỗi `user_session` chỉ được phép xuất hiện trong đúng một split. Không split theo snapshot rows và không hard-code theo file tháng.
 
 ### Online Replay / Demo
