@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import argparse
-import gc
 import logging
+from collections.abc import Iterator
 from datetime import timedelta
 from pathlib import Path
 
@@ -13,6 +13,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from shared import constants, schemas
+from shared.parquet import iter_parquet_batches
 from training.src.config import Config
 from training.src.features import compute_cart_to_view_ratio, normalize_category_value
 
@@ -25,8 +26,21 @@ def _empty_gold_frame() -> pl.DataFrame:
     return pl.from_arrow(pa.Table.from_batches([], schema=schemas.GOLD_SCHEMA))
 
 
+def _iter_parquet_rows(path: str | Path, batch_size: int) -> Iterator[dict]:
+    for batch in iter_parquet_batches(path, batch_size=batch_size):
+        yield from batch.to_pylist()
+
+
+def _iter_split_rows(path: str | Path, batch_size: int) -> Iterator[dict]:
+    for row in _iter_parquet_rows(path, batch_size=batch_size):
+        split = row["split"]
+        if split not in {"train", "val", "test"}:
+            raise ValueError(f"Unexpected split value: {split}")
+        yield row
+
+
 def _session_snapshots(session_df: pl.DataFrame) -> list[dict]:
-    rows = session_df.sort(constants.FIELD_SOURCE_EVENT_TIME).to_dicts()
+    rows = session_df.to_dicts()
     if not rows:
         return []
 
@@ -94,40 +108,15 @@ def build_gold_snapshots(
     silver_path: str | Path,
     split_map_path: str | Path,
     output_dir: str | Path,
+    batch_size: int = Config.GOLD_BATCH_SIZE,
 ) -> None:
-    logger.info("Loading split map from %s", split_map_path)
-    split_map = pl.read_parquet(split_map_path)
-    if split_map.is_empty():
+    logger.info("Streaming split map from %s", split_map_path)
+    split_iter = _iter_split_rows(split_map_path, batch_size=batch_size)
+    current_split_row = next(split_iter, None)
+    if current_split_row is None:
         raise ValueError("split map is missing or empty")
-    logger.info("Loaded split map with %d rows", len(split_map))
 
-    known_splits = {"train", "val", "test"}
-    bad_splits = (
-        split_map.select("split").unique().filter(~pl.col("split").is_in(known_splits))
-    )
-    if not bad_splits.is_empty():
-        raise ValueError(f"Unexpected split value: {bad_splits.to_series().to_list()[0]}")
-
-    logger.info("Loading silver data from %s", silver_path)
-    silver = pl.read_parquet(silver_path)
-    logger.info("Loaded %d silver rows", len(silver))
-
-    missing_sessions = silver.select("user_session").unique().join(
-        split_map.select("user_session").unique(),
-        on="user_session",
-        how="anti",
-    )
-    if not missing_sessions.is_empty():
-        raise ValueError(
-            f"split map does not cover all sessions in silver. "
-            f"Missing {missing_sessions.height} sessions"
-        )
-
-    silver = silver.join(
-        split_map.select(["user_session", "split"]),
-        on="user_session",
-        how="left",
-    ).sort(["user_session", constants.FIELD_SOURCE_EVENT_TIME])
+    logger.info("Streaming silver data from %s", silver_path)
 
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -142,23 +131,69 @@ def build_gold_snapshots(
     logger.info("Processing sessions...")
     total_sessions = 0
     split_counts: dict[str, int] = {"train": 0, "val": 0, "test": 0}
+    current_session_id: str | None = None
+    current_session_rows: list[dict] = []
+
+    def advance_split_row(session_id: str) -> None:
+        nonlocal current_split_row
+
+        while current_split_row is not None and current_split_row["user_session"] < session_id:
+            current_split_row = next(split_iter, None)
+
+        if current_split_row is None:
+            raise ValueError(
+                "split map does not cover all sessions in silver. "
+                f"Missing session {session_id}"
+            )
+
+        split_session = current_split_row["user_session"]
+        if split_session > session_id:
+            raise ValueError(
+                "split map does not cover all sessions in silver. "
+                f"Missing session {session_id}"
+            )
+
+    def flush_current_session() -> None:
+        nonlocal current_session_id, current_session_rows, total_sessions
+
+        if not current_session_rows:
+            return
+
+        snapshots_list = _session_snapshots(pl.DataFrame(current_session_rows))
+        split = current_split_row["split"]
+
+        if snapshots_list:
+            data = {name: [s[name] for s in snapshots_list] for name in schema.names}
+            table = pa.Table.from_pydict(data, schema=schema)
+            writers[split].write_table(table)
+            split_counts[split] += len(snapshots_list)
+            split_written[split] = True
+
+        total_sessions += 1
+        if total_sessions % 100_000 == 0:
+            logger.info("Processed %d sessions...", total_sessions)
+        current_session_id = None
+        current_session_rows = []
 
     try:
-        for (_session_id,), session_df in silver.group_by("user_session", maintain_order=True):
-            split = session_df["split"][0]
-            snapshots_list = _session_snapshots(session_df.drop("split"))
+        for row in _iter_parquet_rows(silver_path, batch_size=batch_size):
+            session_id = row["user_session"]
 
-            if snapshots_list:
-                data = {name: [s[name] for s in snapshots_list] for name in schema.names}
-                table = pa.Table.from_pydict(data, schema=schema)
-                writers[split].write_table(table)
-                split_counts[split] += len(snapshots_list)
-                split_written[split] = True
+            if current_session_id is None:
+                advance_split_row(session_id)
+                current_session_id = session_id
+            elif session_id != current_session_id:
+                flush_current_session()
+                advance_split_row(session_id)
+                current_session_id = session_id
 
-            total_sessions += 1
-            if total_sessions % 100_000 == 0:
-                logger.info("Processed %d sessions...", total_sessions)
+            current_session_rows.append(row)
 
+        flush_current_session()
+        if next(split_iter, None) is not None:
+            raise ValueError(
+                "split map contains a session that does not exist in silver"
+            )
         logger.info("Processed %d total sessions", total_sessions)
 
         for split in ("train", "val", "test"):
@@ -176,10 +211,6 @@ def build_gold_snapshots(
         split_counts["test"],
     )
 
-    del silver
-    del split_map
-    gc.collect()
-
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -188,9 +219,15 @@ def main() -> None:
     parser.add_argument("--input", default=Config.SILVER_DATA_PATH)
     parser.add_argument("--split-map", default=f"{Config.GOLD_DATA_DIR}/session_split_map.parquet")
     parser.add_argument("--output", default=Config.GOLD_DATA_DIR)
+    parser.add_argument("--batch-size", type=int, default=Config.GOLD_BATCH_SIZE)
     args = parser.parse_args()
 
-    build_gold_snapshots(args.input, args.split_map, args.output)
+    build_gold_snapshots(
+        args.input,
+        args.split_map,
+        args.output,
+        batch_size=args.batch_size,
+    )
 
 
 if __name__ == "__main__":
