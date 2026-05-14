@@ -2,12 +2,12 @@ schema: '2.0'
 stages:
   bronze:
     cmd: python -m training.src.bronze --input data/train_raw --output 
-      data/bronze
+      data/bronze/events.parquet
     deps:
     - path: data/train_raw
       hash: md5
-      md5: c9860271c90687352f3e18152087c8d6.dir
-      size: 1741928540
+      md5: 92b61dcfe34aba60c2cf095b7231d501.dir
+      size: 51171018
       nfiles: 1
     - path: shared/constants.py
       hash: md5
@@ -19,26 +19,25 @@ stages:
       size: 4029
     - path: training/src/bronze.py
       hash: md5
-      md5: 42cdb75738dca3e31e622c102da4e55d
-      size: 21729
+      md5: a11c60f34dbc2c654d8c46a4079d837e
+      size: 21823
     - path: training/src/config.py
       hash: md5
-      md5: 252583ff0c4335fc0a6e0803039d7107
-      size: 7377
+      md5: af164ea5fe1790a6f194991b3169035a
+      size: 7878
     outs:
-    - path: data/bronze
+    - path: data/bronze/events.parquet
       hash: md5
-      md5: a3e7df61198ba598381967dd32c7345e.dir
-      size: 1187489862
-      nfiles: 213
+      md5: aba52ef90f4f55a7ae68f8d62b242c0a
+      size: 34188441
   silver:
-    cmd: python -m training.src.silver --input data/bronze --output data/silver
+    cmd: python -m training.src.silver --input data/bronze/events.parquet 
+      --output data/silver
     deps:
-    - path: data/bronze
+    - path: data/bronze/events.parquet
       hash: md5
-      md5: a3e7df61198ba598381967dd32c7345e.dir
-      size: 1187489862
-      nfiles: 213
+      md5: aba52ef90f4f55a7ae68f8d62b242c0a
+      size: 34188441
     - path: shared/constants.py
       hash: md5
       md5: 87cbff908753749bbff2f5825177236d
@@ -49,29 +48,29 @@ stages:
       size: 4029
     - path: training/src/config.py
       hash: md5
-      md5: 252583ff0c4335fc0a6e0803039d7107
-      size: 7377
+      md5: af164ea5fe1790a6f194991b3169035a
+      size: 7878
     - path: training/src/features.py
       hash: md5
       md5: 6072bed8c34703a254992f9bc980ffc7
       size: 375
     - path: training/src/gold.py
       hash: md5
-      md5: f408890262cb415a081550036387c647
-      size: 5386
+      md5: 60ee481e87c3d93a11d8c24a6e69f644
+      size: 9412
     - path: training/src/session_split.py
       hash: md5
-      md5: 1584528ac8ac5ee8839077c72daac0f0
-      size: 1810
+      md5: 9cdf8ef6680280e1480b6b363c850770
+      size: 2671
     - path: training/src/silver.py
       hash: md5
-      md5: 20d32c9344c0ce48c3914b2e44b34325
-      size: 20136
+      md5: b77185e0c3704cf0cae2a540052693fd
+      size: 20189
     outs:
     - path: data/silver
       hash: md5
-      md5: 5524ba832457d3fd3d422cc3d6b8d430.dir
-      size: 1144030599
+      md5: b1b91df7e11c01037c28fb2ae7583584.dir
+      size: 28428519
       nfiles: 1
   session_split:
     cmd: python -m training.src.session_split --input data/silver --output 
@@ -79,8 +78,8 @@ stages:
     deps:
     - path: data/silver
       hash: md5
-      md5: 5524ba832457d3fd3d422cc3d6b8d430.dir
-      size: 1144030599
+      md5: b1b91df7e11c01037c28fb2ae7583584.dir
+      size: 28428519
       nfiles: 1
     - path: shared/constants.py
       hash: md5
@@ -92,14 +91,64 @@ stages:
       size: 4029
     - path: training/src/config.py
       hash: md5
-      md5: 252583ff0c4335fc0a6e0803039d7107
-      size: 7377
+      md5: af164ea5fe1790a6f194991b3169035a
+      size: 7878
     - path: training/src/session_split.py
       hash: md5
-      md5: 1584528ac8ac5ee8839077c72daac0f0
-      size: 1810
+      md5: 9cdf8ef6680280e1480b6b363c850770
+      size: 2671
     outs:
     - path: data/gold/session_split_map.parquet
       hash: md5
-      md5: 673de37bfb867160d577c59035e1d469
-      size: 232088848
+      md5: bffbcc1c35fe6edaa65099ea48c6dd41
+      size: 7668575
+  gold:
+    cmd: python -m training.src.gold --input data/silver --split-map 
+      data/gold/session_split_map.parquet --output data/gold
+    deps:
+    - path: data/gold/session_split_map.parquet
+      hash: md5
+      md5: bffbcc1c35fe6edaa65099ea48c6dd41
+      size: 7668575
+    - path: data/silver
+      hash: md5
+      md5: b1b91df7e11c01037c28fb2ae7583584.dir
+      size: 28428519
+      nfiles: 1
+    - path: shared/constants.py
+      hash: md5
+      md5: 87cbff908753749bbff2f5825177236d
+      size: 2926
+    - path: shared/schemas.py
+      hash: md5
+      md5: cc6feb726d1f22710d61e0654b2f2588
+      size: 4029
+    - path: training/src/config.py
+      hash: md5
+      md5: af164ea5fe1790a6f194991b3169035a
+      size: 7878
+    - path: training/src/features.py
+      hash: md5
+      md5: 6072bed8c34703a254992f9bc980ffc7
+      size: 375
+    - path: training/src/gold.py
+      hash: md5
+      md5: 60ee481e87c3d93a11d8c24a6e69f644
+      size: 9412
+    - path: training/src/session_split.py
+      hash: md5
+      md5: 9cdf8ef6680280e1480b6b363c850770
+      size: 2671
+    outs:
+    - path: data/gold/test.parquet
+      hash: md5
+      md5: 6bd6d45d64467e533cde2e6543fb6732
+      size: 101445695
+    - path: data/gold/train.parquet
+      hash: md5
+      md5: cdf0284a53f155e84f2f7d7845e6421c
+      size: 805997069
+    - path: data/gold/val.parquet
+      hash: md5
+      md5: 8259539206e15873705dffef72db95a4
+      size: 101082163
