@@ -21,8 +21,6 @@ stages:
       - training/src/silver.py
       - training/src/config.py
       - training/src/features.py
-      - training/src/session_split.py
-      - training/src/gold.py
       - shared/constants.py
       - shared/schemas.py
       - data/bronze/events.parquet
@@ -65,7 +63,7 @@ stages:
 
   train:
     desc: "Train three models, select winner by validation PR-AUC, validate against production"
-    cmd: python -m training.src.train --train data/gold/train.parquet --val data/gold/val.parquet --test data/gold/test.parquet --session-split-map data/gold/session_split_map.parquet
+    cmd: python -m training.src.train --train data/gold/train.parquet --val data/gold/val.parquet --test data/gold/test.parquet --session-split-map data/gold/session_split_map.parquet --device auto
     deps:
       - training/src/train.py
       - training/src/evaluate.py
@@ -80,5 +78,5 @@ stages:
       - data/gold/test.parquet
       - data/gold/session_split_map.parquet
     outs:
-      - mlruns:
-          desc: "MLflow experiment tracking directory (local)"
+      - reports/train_metrics.json:
+          desc: "Compact stage summary for DVC tracking"
