@@ -80,7 +80,7 @@ class Config:
     # Optuna Configuration (Sprint 2b)
     # ========================================================================
     OPTUNA_SMOKE_TRIALS = int(os.getenv("OPTUNA_SMOKE_TRIALS", "3"))
-    OPTUNA_TARGET_TRIALS = int(os.getenv("OPTUNA_TARGET_TRIALS", "50"))
+    OPTUNA_TARGET_TRIALS = int(os.getenv("OPTUNA_TARGET_TRIALS", "10"))
     OPTUNA_TIMEOUT_SECONDS = int(os.getenv("OPTUNA_TIMEOUT_SECONDS", "3600"))
 
     # ========================================================================

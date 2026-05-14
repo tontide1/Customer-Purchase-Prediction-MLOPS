@@ -53,3 +53,7 @@ def test_gather_lineage_metadata_counts_rows_and_resolves_paths(tmp_path):
     assert metadata["dvc_data_revision"] == "abc123"
     assert metadata["input_train_path"] == str(train_path.resolve())
     assert metadata["input_session_split_map_path"] == str(split_map_path.resolve())
+    assert isinstance(metadata.get("gold_input_manifest_hash"), str)
+    assert metadata.get("gold_input_file_count") == 4
+    assert "raw_input_manifest_hash" not in metadata
+    assert "raw_input_file_count" not in metadata

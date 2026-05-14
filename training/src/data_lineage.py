@@ -47,8 +47,8 @@ def gather_lineage_metadata(
     """
     gold_root = os.path.dirname(os.path.abspath(train_path))
     return {
-        "raw_input_manifest_hash": compute_manifest_hash(gold_root),
-        "raw_input_file_count": len(list(Path(gold_root).glob("*.parquet"))),
+        "gold_input_manifest_hash": compute_manifest_hash(gold_root),
+        "gold_input_file_count": len(list(Path(gold_root).glob("*.parquet"))),
         "window_start_utc": window_start_utc or "",
         "window_end_utc": window_end_utc or "",
         "row_count_gold_train": _count_rows(train_path),

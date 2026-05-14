@@ -5,7 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict
 
 import mlflow
@@ -27,6 +29,7 @@ from training.src.categorical_features import (
 )
 from training.src.config import Config
 from training.src.data_lineage import gather_lineage_metadata
+from training.src.explainability import generate_shap_artifacts, serialize_explainer
 from training.src.evaluate import compute_metrics
 from training.src.model_validation import validate_model_gate
 
@@ -42,6 +45,8 @@ OPTUNA_TARGET_TRIALS = Config.OPTUNA_TARGET_TRIALS
 MIN_VALIDATION_PR_AUC_THRESHOLD = Config.MIN_VALIDATION_PR_AUC_THRESHOLD
 TRAIN_DEVICE = Config.TRAIN_DEVICE
 GPU_DEVICE_ID = Config.GPU_DEVICE_ID
+TEST_SAMPLE_SIZE = Config.TEST_SAMPLE_SIZE
+TRAIN_REPORT_PATH = Path("reports/train_metrics.json")
 
 
 @dataclass(frozen=True)
@@ -74,6 +79,58 @@ def _log_metrics(
         json.dumps(metrics["confusion_matrix"].tolist()),
         confusion_matrix_name,
     )
+
+
+def _log_model_artifact(candidate_name: str, model) -> None:
+    if candidate_name == "catboost":
+        mlflow.catboost.log_model(model, "model")
+        return
+
+    mlflow.sklearn.log_model(model, "model")
+
+
+def _prepare_shap_sample(test_features: pd.DataFrame) -> pd.DataFrame:
+    if len(test_features) <= TEST_SAMPLE_SIZE:
+        return test_features
+    return test_features.sample(n=TEST_SAMPLE_SIZE, random_state=42)
+
+
+def _log_winner_shap_artifacts(model, test_features: pd.DataFrame) -> None:
+    shap_features = _prepare_shap_sample(test_features)
+    shap_artifacts = generate_shap_artifacts(
+        model,
+        shap_features,
+        X_test=shap_features,
+    )
+    mlflow.log_artifact(shap_artifacts["summary_plot_path"], artifact_path="shap")
+
+    with tempfile.TemporaryDirectory(prefix="winner-shap-") as temp_dir:
+        explainer_path = Path(temp_dir) / "explainer.pkl"
+        serialize_explainer(shap_artifacts["explainer"], explainer_path)
+        mlflow.log_artifact(str(explainer_path), artifact_path="shap")
+
+
+def _write_train_report(
+    *,
+    winner_name: str,
+    winner_metrics: dict,
+    test_metrics: dict,
+    gate_pass: bool,
+) -> None:
+    report_path = TRAIN_REPORT_PATH
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report = {
+        "winner_name": winner_name,
+        "winner_validation_pr_auc": float(winner_metrics["pr_auc"]),
+        "winner_validation_average_precision": float(
+            winner_metrics["average_precision"]
+        ),
+        "winner_validation_threshold": float(winner_metrics.get("optimal_threshold", 0.5)),
+        "test_pr_auc": float(test_metrics["pr_auc"]),
+        "test_average_precision": float(test_metrics["average_precision"]),
+        "validation_gate_passed": bool(gate_pass),
+    }
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def _resolve_training_device(
@@ -259,6 +316,14 @@ def _train_candidate_with_device_policy(
             exc,
         )
         return run("cpu")
+
+
+def _lightgbm_device_for_policy(device: str) -> str:
+    """Keep LightGBM off GPU because high-cardinality categorical bins exceed GPU limits."""
+
+    if device in {"auto", "gpu"}:
+        return "cpu"
+    return device
 
 
 def train_catboost_candidate(
@@ -458,7 +523,7 @@ def main() -> int:
             categorical_columns=data.categorical_columns,
         )
         _log_metrics(catboost_metrics, "catboost_confusion_matrix.json")
-        mlflow.sklearn.log_model(catboost_model, "model")
+        _log_model_artifact("catboost", catboost_model)
         results["catboost"] = {
             "model": catboost_model,
             "metrics": catboost_metrics,
@@ -466,10 +531,16 @@ def main() -> int:
 
     with mlflow.start_run(run_name="lightgbm"):
         mlflow.log_dict(lineage_metadata, "lineage/metadata.json")
+        lightgbm_device = _lightgbm_device_for_policy(args.device)
+        if lightgbm_device != args.device:
+            logger.info(
+                "LightGBM device policy resolved to %s to avoid GPU categorical-bin limits",
+                lightgbm_device,
+            )
         lgb_model, lgb_metrics = _train_candidate_with_device_policy(
             "lightgbm",
             train_lightgbm_candidate,
-            device=args.device,
+            device=lightgbm_device,
             gpu_device_id=args.gpu_device_id,
             train_features=data.train_features,
             train_target=data.train_target,
@@ -479,7 +550,7 @@ def main() -> int:
             categorical_columns=data.categorical_columns,
         )
         _log_metrics(lgb_metrics, "lightgbm_confusion_matrix.json")
-        mlflow.sklearn.log_model(lgb_model, "model")
+        _log_model_artifact("lightgbm", lgb_model)
         results["lightgbm"] = {"model": lgb_model, "metrics": lgb_metrics}
 
     with mlflow.start_run(run_name="xgboost"):
@@ -496,7 +567,7 @@ def main() -> int:
             n_trials=n_trials,
         )
         _log_metrics(xgb_metrics, "xgboost_confusion_matrix.json")
-        mlflow.sklearn.log_model(xgb_model, "model")
+        _log_model_artifact("xgboost", xgb_model)
         results["xgboost"] = {"model": xgb_model, "metrics": xgb_metrics}
 
     winner_name, winner_data = find_best_model_by_validation_pr_auc(results)
@@ -520,6 +591,7 @@ def main() -> int:
             f"{winner_name}_test_confusion_matrix.json",
             metric_prefix="test_",
         )
+        _log_winner_shap_artifacts(winner_data["model"], data.test_features)
     logger.info(
         "Test results for %s: PR-AUC=%.4f, average_precision=%.4f",
         winner_name,
@@ -537,6 +609,12 @@ def main() -> int:
         logger.error("Model failed validation gate")
         return 1
 
+    _write_train_report(
+        winner_name=winner_name,
+        winner_metrics=winner_data["metrics"],
+        test_metrics=test_metrics,
+        gate_pass=gate_pass,
+    )
     logger.info("Model passed validation gate")
     return 0
 
