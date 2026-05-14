@@ -88,10 +88,17 @@ class TestBronzeLayer:
         ts = df[constants.FIELD_EVENT_TIME][0]
         assert isinstance(ts, dt.datetime)
         assert ts.replace(tzinfo=None) == dt.datetime(
-            2019, 10, 1, 10, 0, 0,
+            2019,
+            10,
+            1,
+            10,
+            0,
+            0,
         )
 
-    def test_event_time_to_source_event_time_rename(self, sample_raw_df: pl.DataFrame) -> None:
+    def test_event_time_to_source_event_time_rename(
+        self, sample_raw_df: pl.DataFrame
+    ) -> None:
         parsed = parse_event_time(sample_raw_df.clone())
         df_bronze = transform_to_bronze(parsed)
         assert constants.FIELD_SOURCE_EVENT_TIME in df_bronze.columns
@@ -102,7 +109,11 @@ class TestBronzeLayer:
         df_bronze = transform_to_bronze(parsed)
 
         assert constants.FIELD_CATEGORY_ID in df_bronze.columns
-        assert df_bronze[constants.FIELD_CATEGORY_ID].to_list() == ["cat1", "cat2", "cat3"]
+        assert df_bronze[constants.FIELD_CATEGORY_ID].to_list() == [
+            "cat1",
+            "cat2",
+            "cat3",
+        ]
 
     def test_valid_event_type_kept(self, sample_raw_df: pl.DataFrame) -> None:
         parsed = parse_event_time(sample_raw_df.clone())
@@ -152,7 +163,9 @@ class TestSilverLayer:
     def test_required_fields_check(self, sample_bronze_df: pl.DataFrame) -> None:
         uids = sample_bronze_df["user_id"].to_list()
         uids[0] = None
-        df_modified = sample_bronze_df.with_columns(pl.Series(name="user_id", values=uids))
+        df_modified = sample_bronze_df.with_columns(
+            pl.Series(name="user_id", values=uids)
+        )
 
         df_valid, num_rejected = check_required_fields(df_modified)
 
@@ -280,10 +293,14 @@ class TestTimestampContract:
     def test_raw_uses_event_time(self, sample_raw_df: pl.DataFrame) -> None:
         assert constants.FIELD_EVENT_TIME in sample_raw_df.columns
 
-    def test_bronze_uses_source_event_time(self, sample_bronze_df: pl.DataFrame) -> None:
+    def test_bronze_uses_source_event_time(
+        self, sample_bronze_df: pl.DataFrame
+    ) -> None:
         assert constants.FIELD_SOURCE_EVENT_TIME in sample_bronze_df.columns
 
-    def test_timestamp_preserved_through_layers(self, sample_raw_df: pl.DataFrame) -> None:
+    def test_timestamp_preserved_through_layers(
+        self, sample_raw_df: pl.DataFrame
+    ) -> None:
         parsed = parse_event_time(sample_raw_df.clone())
         df_bronze = transform_to_bronze(parsed)
         first = df_bronze.item(0, constants.FIELD_SOURCE_EVENT_TIME)
@@ -346,7 +363,9 @@ class TestPipelineIntegration:
 
 
 class TestDataPathConfig:
-    def test_data_strategy_config_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_data_strategy_config_defaults(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.delenv("TRAIN_RAW_DATA_PATH", raising=False)
         monkeypatch.delenv("SIMULATION_RAW_DATA_PATH", raising=False)
         monkeypatch.delenv("RETRAIN_RAW_DATA_DIR", raising=False)

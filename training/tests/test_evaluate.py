@@ -19,12 +19,23 @@ def test_compute_metrics_structure(binary_predictions):
     y_true, y_pred = binary_predictions
     metrics, threshold = compute_metrics(y_true, y_pred)
 
-    required_keys = ["pr_auc", "f1", "precision", "recall", "confusion_matrix", "optimal_threshold"]
+    required_keys = [
+        "pr_auc",
+        "f1",
+        "precision",
+        "recall",
+        "confusion_matrix",
+        "optimal_threshold",
+    ]
     for key in required_keys:
         assert key in metrics, f"Missing key: {key}"
-    
-    assert isinstance(threshold, (float, np.floating)), "Returned threshold should be float"
-    assert metrics["optimal_threshold"] == threshold, "optimal_threshold in dict should match returned threshold"
+
+    assert isinstance(threshold, (float, np.floating)), (
+        "Returned threshold should be float"
+    )
+    assert metrics["optimal_threshold"] == threshold, (
+        "optimal_threshold in dict should match returned threshold"
+    )
 
 
 def test_pr_auc_in_valid_range(binary_predictions):

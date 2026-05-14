@@ -1,8 +1,9 @@
 """Tests for the streaming gold snapshot builder."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import polars as pl
+import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
 
@@ -14,27 +15,29 @@ def _make_silver(tmp_path, sessions):
     rows = []
     for session_id, events in sessions.items():
         for event in events:
-            rows.append({
-                "source_event_time": event["time"],
-                "event_type": event["type"],
-                "product_id": event.get("product_id", "P001"),
-                "category_id": event.get("category_id", "C001"),
-                "user_id": event.get("user_id", "U001"),
-                "user_session": session_id,
-                "category_code": event.get("category_code"),
-                "brand": event.get("brand"),
-                "price": event.get("price"),
-            })
-    df = pl.DataFrame(rows)
+            rows.append(
+                {
+                    "source_event_time": event["time"],
+                    "event_type": event["type"],
+                    "product_id": event.get("product_id", "P001"),
+                    "category_id": event.get("category_id", "C001"),
+                    "user_id": event.get("user_id", "U001"),
+                    "user_session": session_id,
+                    "category_code": event.get("category_code"),
+                    "brand": event.get("brand"),
+                    "price": event.get("price"),
+                }
+            )
     path = tmp_path / "silver.parquet"
-    df.write_parquet(path)
+    table = pa.Table.from_pylist(rows, schema=schemas.SILVER_SCHEMA)
+    pq.write_table(table, path)
     return path
 
 
 def _make_silver_with_row_groups(tmp_path, rows, row_group_size: int):
-    df = pl.DataFrame(rows)
     path = tmp_path / "silver.parquet"
-    pq.write_table(df.to_arrow(), path, row_group_size=row_group_size)
+    table = pa.Table.from_pylist(rows, schema=schemas.SILVER_SCHEMA)
+    pq.write_table(table, path, row_group_size=row_group_size)
     return path
 
 
@@ -153,11 +156,97 @@ def test_streaming_gold_keeps_session_rows_across_parquet_batch_boundary(tmp_pat
     assert val_rows == 1
 
 
+def test_streaming_gold_handles_nullable_string_columns_within_session(tmp_path):
+    start = _ts("2019-10-01T10:00:00")
+    events = [
+        {
+            "time": start,
+            "type": "view",
+            "category_code": None,
+            "brand": None,
+        }
+    ]
+    events.extend(
+        {
+            "time": start + timedelta(minutes=minute),
+            "type": "view",
+            "category_code": None,
+            "brand": None,
+        }
+        for minute in range(1, 102)
+    )
+    events.append(
+        {
+            "time": _ts("2019-10-01T11:50:00"),
+            "type": "cart",
+            "category_code": "appliances.kitchen.meat_grinder",
+            "brand": "brand-x",
+        }
+    )
+    events.append(
+        {
+            "time": _ts("2019-10-01T11:51:00"),
+            "type": "purchase",
+            "category_code": "appliances.kitchen.meat_grinder",
+            "brand": "brand-x",
+        }
+    )
+
+    silver_path = _make_silver(
+        tmp_path,
+        {
+            "S001": events,
+        },
+    )
+    split_map_path = _make_split_map(tmp_path, {"S001": "train"})
+    output_dir = tmp_path / "gold_output"
+
+    build_gold_snapshots(silver_path, split_map_path, output_dir, batch_size=2)
+
+    train_rows = pq.read_metadata(str(output_dir / "train.parquet")).num_rows
+    assert train_rows == len(events)
+
+
+def test_streaming_gold_stops_after_split_map_is_exhausted(tmp_path):
+    silver_path = _make_silver(
+        tmp_path,
+        {
+            "S001": [
+                {"time": _ts("2019-10-01T10:00:00"), "type": "view"},
+                {"time": _ts("2019-10-01T10:01:00"), "type": "purchase"},
+            ],
+            "S999": [
+                {"time": _ts("2019-10-20T10:00:00"), "type": "view"},
+            ],
+        },
+    )
+    split_map_path = _make_split_map(
+        tmp_path,
+        {
+            "S001": "train",
+        },
+    )
+    output_dir = tmp_path / "gold_output"
+
+    build_gold_snapshots(silver_path, split_map_path, output_dir, batch_size=2)
+
+    train_rows = pq.read_metadata(str(output_dir / "train.parquet")).num_rows
+    val_rows = pq.read_metadata(str(output_dir / "val.parquet")).num_rows
+    test_rows = pq.read_metadata(str(output_dir / "test.parquet")).num_rows
+
+    assert train_rows == 2
+    assert val_rows == 0
+    assert test_rows == 0
+
+
 def test_streaming_gold_missing_session_raises(tmp_path):
     """Session exists in silver but not in split map."""
-    silver_path = _make_silver(tmp_path, {
-        "S001": [{"time": _ts("2019-10-01T10:00:00"), "type": "view"}],
-    })
+    silver_path = _make_silver(
+        tmp_path,
+        {
+            "S001": [{"time": _ts("2019-10-01T10:00:00"), "type": "view"}],
+        },
+    )
     split_map_path = _make_split_map(tmp_path, {"OTHER": "train"})
 
     with pytest.raises(ValueError, match="split map does not cover all sessions"):
@@ -165,9 +254,11 @@ def test_streaming_gold_missing_session_raises(tmp_path):
 
 
 def test_streaming_gold_empty_split(tmp_path):
-    sessions = {"S001": [
-        {"time": _ts("2019-10-01T10:00:00"), "type": "view"},
-    ]}
+    sessions = {
+        "S001": [
+            {"time": _ts("2019-10-01T10:00:00"), "type": "view"},
+        ]
+    }
     split_map = {"S001": "train"}
 
     silver_path = _make_silver(tmp_path, sessions)
@@ -201,4 +292,6 @@ def test_streaming_gold_invalid_split_raises(tmp_path):
     split_map_path = _make_split_map(tmp_path, {"S001": "holdout"})
 
     with pytest.raises(ValueError, match="Unexpected split value"):
-        build_gold_snapshots(silver_path, split_map_path, tmp_path / "out", batch_size=2)
+        build_gold_snapshots(
+            silver_path, split_map_path, tmp_path / "out", batch_size=2
+        )

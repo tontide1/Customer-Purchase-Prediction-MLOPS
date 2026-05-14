@@ -125,4 +125,6 @@ def test_build_session_split_map_rejects_empty_input(tmp_path):
     silver_dir.mkdir(parents=True, exist_ok=True)
 
     with pytest.raises(ValueError, match="empty"):
-        build_session_split_map(str(silver_dir), str(tmp_path / "session_split.parquet"))
+        build_session_split_map(
+            str(silver_dir), str(tmp_path / "session_split.parquet")
+        )

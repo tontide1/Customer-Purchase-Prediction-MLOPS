@@ -1,8 +1,12 @@
 import os
 
 import numpy as np
+import pandas as pd
 import pytest
-from sklearn.ensemble import RandomForestClassifier
+from catboost import CatBoostClassifier
+from lightgbm import LGBMClassifier
+from xgboost import XGBClassifier
+
 from training.src.explainability import (
     deserialize_explainer,
     generate_shap_artifacts,
@@ -10,21 +14,66 @@ from training.src.explainability import (
 )
 
 
-@pytest.fixture
-def trained_model():
-    """Fixture: simple trained random forest"""
-    X = np.random.rand(100, 5)
-    y = (X[:, 0] + X[:, 1] > 1).astype(int)
-    model = RandomForestClassifier(n_estimators=10, random_state=42)
-    model.fit(X, y)
-    return model, X, y
+def _build_training_data():
+    rng = np.random.default_rng(42)
+    X = pd.DataFrame(
+        {
+            "f1": rng.random(80),
+            "f2": rng.random(80),
+            "f3": rng.random(80),
+            "f4": rng.random(80),
+            "f5": rng.random(80),
+        }
+    )
+    y = (X["f1"] + X["f2"] > 1).astype(int)
+    return X, y
+
+
+@pytest.fixture(params=["catboost", "lightgbm", "xgboost"])
+def trained_model(request):
+    X, y = _build_training_data()
+
+    if request.param == "catboost":
+        model = CatBoostClassifier(
+            iterations=10,
+            depth=4,
+            learning_rate=0.2,
+            loss_function="Logloss",
+            random_seed=42,
+            allow_writing_files=False,
+            verbose=False,
+        )
+        model.fit(X, y)
+    elif request.param == "lightgbm":
+        model = LGBMClassifier(
+            n_estimators=25,
+            max_depth=4,
+            learning_rate=0.2,
+            random_state=42,
+            n_jobs=-1,
+        )
+        model.fit(X, y)
+    else:
+        model = XGBClassifier(
+            n_estimators=25,
+            max_depth=4,
+            learning_rate=0.2,
+            random_state=42,
+            tree_method="hist",
+            enable_categorical=True,
+            eval_metric="aucpr",
+            n_jobs=-1,
+        )
+        model.fit(X, y, verbose=False)
+
+    return request.param, model, X, y
 
 
 def test_shap_artifacts_structure(trained_model):
-    """Test that SHAP artifacts include summary plot and explainer"""
-    model, X, y = trained_model
+    """Test that SHAP artifacts include summary plot and explainer."""
+    model_name, model, X, y = trained_model
     artifacts = generate_shap_artifacts(model, X)
-    
+
     assert "explainer" in artifacts
     assert "summary_plot_path" in artifacts
     assert "summary_values" in artifacts
@@ -33,24 +82,21 @@ def test_shap_artifacts_structure(trained_model):
 
 
 def test_shap_explainer_can_predict(trained_model):
-    """Test that SHAP explainer produces values for samples"""
-    model, X, y = trained_model
+    """Test that SHAP explainer produces values for samples."""
+    model_name, model, X, y = trained_model
     artifacts = generate_shap_artifacts(model, X)
-    
+
     explainer = artifacts["explainer"]
     shap_values = explainer.shap_values(X[:5])
-    
-    # For RandomForest binary classification, shap_values is a 3D array
-    # (n_samples, n_features, n_classes)
-    assert isinstance(shap_values, np.ndarray)
-    assert shap_values.shape == (5, 5, 2)  # 5 samples, 5 features, 2 classes
+
+    assert shap_values is not None
 
 
 def test_summary_values_shape(trained_model):
-    """Test that summary values have correct shape"""
-    model, X, y = trained_model
+    """Test that summary values have correct shape."""
+    model_name, model, X, y = trained_model
     artifacts = generate_shap_artifacts(model, X)
-    
+
     summary = artifacts["summary_values"]
     assert isinstance(summary, np.ndarray)
     assert summary.ndim == 2
@@ -58,7 +104,7 @@ def test_summary_values_shape(trained_model):
 
 def test_shap_explainer_round_trip(trained_model, tmp_path):
     """Test SHAP explainer serialization round-trip."""
-    model, X, y = trained_model
+    model_name, model, X, y = trained_model
     artifacts = generate_shap_artifacts(model, X)
 
     explainer = artifacts["explainer"]

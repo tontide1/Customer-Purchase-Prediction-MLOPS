@@ -9,7 +9,10 @@ import pytest
 from polars.testing import assert_frame_equal
 
 from shared import constants, schemas
-from training.src.bronze import finalize_bronze_polars_dtypes, bronze_polars_to_arrow_table
+from training.src.bronze import (
+    finalize_bronze_polars_dtypes,
+    bronze_polars_to_arrow_table,
+)
 from training.src.silver import (
     choose_silver_merge_batch_size,
     enforce_silver_dtypes,

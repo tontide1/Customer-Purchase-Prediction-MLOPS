@@ -43,7 +43,9 @@ def test_build_gold_snapshots_rejects_unknown_split(tmp_path) -> None:
     pq.write_table(split_map_df.to_arrow(), split_map_path)
 
     with pytest.raises(ValueError, match="Unexpected split value: holdout"):
-        build_gold_snapshots(silver_path, split_map_path, tmp_path / "gold", batch_size=2)
+        build_gold_snapshots(
+            silver_path, split_map_path, tmp_path / "gold", batch_size=2
+        )
 
 
 def test_build_gold_snapshots_rejects_extra_split_session(tmp_path) -> None:
@@ -85,5 +87,9 @@ def test_build_gold_snapshots_rejects_extra_split_session(tmp_path) -> None:
     pq.write_table(silver_df.to_arrow(), silver_path)
     pq.write_table(split_map_df.to_arrow(), split_map_path)
 
-    with pytest.raises(ValueError, match="split map contains a session that does not exist in silver"):
-        build_gold_snapshots(silver_path, split_map_path, tmp_path / "gold", batch_size=2)
+    with pytest.raises(
+        ValueError, match="split map contains a session that does not exist in silver"
+    ):
+        build_gold_snapshots(
+            silver_path, split_map_path, tmp_path / "gold", batch_size=2
+        )
