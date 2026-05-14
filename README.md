@@ -1,9 +1,24 @@
-# IUH Final MLOps Project
+# Agent Instructions
 
-Customer purchase prediction MLOps project. The repository is currently in
-Week 1: data foundation. The executable surface today is the raw-to-bronze and
-bronze-to-silver data lake pipeline; blueprint documents describe the target
-state for later weeks.
+## Core coding behavior (IMPORTANT)
+
+When working in this repository:
+
+- Prefer simple, surgical changes over broad refactors.
+- Preserve existing project style, naming, formatting, and architecture unless explicitly asked to change them.
+- Do not introduce speculative abstractions, new frameworks, or unnecessary configuration.
+- For bugs, first identify the likely root cause, then make the smallest safe fix.
+- For non-trivial changes, state the plan, edit the code, then run the smallest relevant verification command.
+- Do not modify secrets, credentials, `.env` files, generated artifacts, model weights, raw datasets, or production data unless explicitly instructed.
+- Treat tool outputs as advisory. Verify changes against the repository, tests, logs, and runtime behavior.
+
+## About project
+
+Customer purchase prediction MLOps project. The repository now includes the
+Week 1 data foundation plus the Week 2 categorical-aware training pipeline.
+The executable surface spans raw-to-bronze, bronze-to-silver, session split,
+gold snapshots, and model training; blueprint documents describe the target
+state for the remaining serving/monitoring pieces.
 
 ## What Works Today
 
@@ -13,18 +28,22 @@ state for later weeks.
 - Silver pipeline: reads bronze parquet files or dataset directories in
   batches, filters invalid rows, globally deduplicates by the canonical event
   key, globally sorts deterministically, and writes silver parquet.
-- DVC pipeline: `bronze -> silver`.
+- Session split and gold pipelines: build `data/gold/session_split_map.parquet`
+  and per-event gold snapshots for train/val/test.
+- Training pipeline: compares `CatBoost`, `LightGBM`, and `XGBoost` on the
+  gold snapshots, logs to MLflow, and selects the winner by validation PR-AUC.
+- DVC pipeline: `bronze -> silver -> session_split -> gold -> train`.
 - Local MinIO scaffold for future object storage integration.
 
 ## Repository Layout
 
 ```text
 shared/               Shared constants and PyArrow schemas
-training/src/         Bronze and silver pipeline code
-training/tests/       Pytest coverage for Week 1 contracts
+training/src/         Bronze, silver, gold, and training pipeline code
+training/tests/       Pytest coverage for Week 1 and Week 2 contracts
 docs/                 Blueprint and implementation notes
 infra/minio/          Local MinIO bucket initialization
-dvc.yaml              Executable Week 1 DVC stages
+dvc.yaml              Executable Week 1 and Week 2 DVC stages
 docker-compose.yml    Local MinIO services
 ```
 
@@ -59,20 +78,36 @@ The bronze pipeline defaults to the `training` window profile and only reads
 `data/train_raw`. The replay file in `data/simulation_raw` is intentionally
 not ingested by the baseline pipeline.
 
-Start local object storage:
+Start local object storage and MLflow:
 
 ```bash
 docker compose up -d
 docker compose ps
 ```
 
-Run the Week 1 data pipeline:
+The MLflow server uses SQLite for tracking metadata and stores run artifacts in
+MinIO at `s3://mlops-artifacts/mlflow` through MLflow's artifact proxy. If you
+change MinIO credentials, keep `AWS_ACCESS_KEY_ID` and
+`AWS_SECRET_ACCESS_KEY` aligned for the MLflow service.
+
+If `sprint2b_training` was already created before this S3 artifact setup,
+reset the local MLflow backend once so the experiment is recreated with the
+new artifact location:
+
+```bash
+docker compose down
+docker volume rm iuh_final_mlflow_backend
+docker compose up -d --build
+```
+
+Run the full pipeline, which executes Week 1 data preparation and Week 2
+training:
 
 ```bash
 dvc repro
 ```
 
-Equivalent direct commands:
+If you want to run only Week 1 step by step, use the direct module commands:
 
 ```bash
 python -m training.src.bronze \
@@ -82,6 +117,25 @@ python -m training.src.bronze \
 python -m training.src.silver \
   --input data/bronze/events.parquet \
   --output data/silver/events.parquet
+
+python -m training.src.session_split \
+  --input data/silver \
+  --output data/gold/session_split_map.parquet
+
+python -m training.src.gold \
+  --input data/silver \
+  --split-map data/gold/session_split_map.parquet \
+  --output data/gold
+```
+
+If you want to run only Week 2 after Week 1 has produced the gold files, use:
+
+```bash
+python -m training.src.train \
+  --train data/gold/train.parquet \
+  --val data/gold/val.parquet \
+  --test data/gold/test.parquet \
+  --session-split-map data/gold/session_split_map.parquet
 ```
 
 Run checks:
@@ -105,11 +159,14 @@ PRE_COMMIT_HOME=/tmp/pre-commit-cache pre-commit run --all-files
 - Online replay uses `data/simulation_raw/2019-Nov.csv.gz`.
 - Retraining should use replay events exported into `data/retrain_raw`.
 - Baseline bronze ingestion must not read from `data/simulation_raw`.
+- Week 2 training consumes the gold outputs from Week 1 and does not read raw
+  CSV files directly.
 
 ## Current Limits
 
-- Gold/session features, model training, serving, monitoring, and explainability
-  are roadmap items, not executable production code yet.
+- Gold/session features, categorical-aware model training, and explainability
+  are implemented; serving, monitoring, and online hot-reload remain roadmap
+  items.
 - `docs/BLUEPRINT/*.md` and `BLUEPRINT.md` are target-state design documents;
   prefer executable files such as `dvc.yaml` and `training/src/*.py` when there
   is a conflict.
