@@ -23,7 +23,7 @@ stages:
       size: 21823
     - path: training/src/config.py
       hash: md5
-      md5: af164ea5fe1790a6f194991b3169035a
+      md5: 6309816084d063555c43b89e32fb3869
       size: 7878
     outs:
     - path: data/bronze/events.parquet
@@ -48,20 +48,12 @@ stages:
       size: 4029
     - path: training/src/config.py
       hash: md5
-      md5: af164ea5fe1790a6f194991b3169035a
+      md5: 6309816084d063555c43b89e32fb3869
       size: 7878
     - path: training/src/features.py
       hash: md5
       md5: 6072bed8c34703a254992f9bc980ffc7
       size: 375
-    - path: training/src/gold.py
-      hash: md5
-      md5: 60ee481e87c3d93a11d8c24a6e69f644
-      size: 9412
-    - path: training/src/session_split.py
-      hash: md5
-      md5: 9cdf8ef6680280e1480b6b363c850770
-      size: 2671
     - path: training/src/silver.py
       hash: md5
       md5: b77185e0c3704cf0cae2a540052693fd
@@ -91,7 +83,7 @@ stages:
       size: 4029
     - path: training/src/config.py
       hash: md5
-      md5: af164ea5fe1790a6f194991b3169035a
+      md5: 6309816084d063555c43b89e32fb3869
       size: 7878
     - path: training/src/session_split.py
       hash: md5
@@ -125,7 +117,7 @@ stages:
       size: 4029
     - path: training/src/config.py
       hash: md5
-      md5: af164ea5fe1790a6f194991b3169035a
+      md5: 6309816084d063555c43b89e32fb3869
       size: 7878
     - path: training/src/features.py
       hash: md5

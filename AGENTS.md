@@ -55,7 +55,7 @@
 - Quick health check: `docker compose ps` (MinIO ports `9000` API, `9001` console; MLflow port `5000`).
 - Sprint 2a pipeline commands (> main branch; Sprint 2b adds train stage):
   - `python -m training.src.bronze --input data/train_raw --output data/bronze/events.parquet`
-  - `python -m training.src.silver --input data/bronze/events.parquet --output data/silver/events.parquet`
+  - `python -m training.src.silver --input data/bronze/events.parquet --output data/silver`
   - `python -m training.src.session_split --input data/silver --output data/gold/session_split_map.parquet`
   - `python -m training.src.gold --input data/silver --split-map data/gold/session_split_map.parquet --output data/gold`
   - `dvc repro` now runs `bronze` -> `silver` -> `session_split` -> `gold`.

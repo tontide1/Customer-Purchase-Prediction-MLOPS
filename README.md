@@ -102,7 +102,7 @@ python -m training.src.bronze \
 
 python -m training.src.silver \
   --input data/bronze/events.parquet \
-  --output data/silver/events.parquet
+  --output data/silver
 
 python -m training.src.session_split \
   --input data/silver \
