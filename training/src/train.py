@@ -476,12 +476,13 @@ def main() -> int:
         winner_data["metrics"]["pr_auc"],
     )
 
-    test_metrics = evaluate_winner_on_test(
-        winner_data["model"],
-        data.test_features,
-        data.test_target,
-    )
-    mlflow.log_metrics({f"test_{k}": v for k, v in test_metrics.items() if isinstance(v, (int, float, np.floating))})
+    with mlflow.start_run(run_name=f"{winner_name}_test_evaluation"):
+        test_metrics = evaluate_winner_on_test(
+            winner_data["model"],
+            data.test_features,
+            data.test_target,
+        )
+        mlflow.log_metrics({f"test_{k}": v for k, v in test_metrics.items() if isinstance(v, (int, float, np.floating))})
     logger.info(
         "Test results for %s: PR-AUC=%.4f, average_precision=%.4f",
         winner_name,
