@@ -82,14 +82,14 @@ data/raw/*.csv(.gz) -> Window selection -> Bronze ingestion (chunked, partitione
     * Nếu một session có nhiều `purchase` trong horizon, vẫn chỉ cần tồn tại ít nhất một `purchase` để gán label `1`.
     * Ghi output gold theo split vào `data/gold/`.
 7. **Handle Class Imbalance:** Tỷ lệ purchase thường chỉ ~2-5% trong eCommerce. Mỗi model có cách xử lý riêng:
-   * **XGBoost:** Sử dụng `scale_pos_weight` (tỷ lệ negative/positive).
+   * **CatBoost:** Sử dụng `scale_pos_weight` hoặc class weighting tương đương.
    * **LightGBM:** Sử dụng `is_unbalance=True` hoặc `scale_pos_weight`.
-   * **Random Forest:** Sử dụng `class_weight='balanced'`.
-   * So sánh với SMOTE trong experiment log.
-8. **Train Multi-Model:** Train **3 models** song song, mỗi model có **experiment run riêng** trên MLflow:
-   * **Model 1 — XGBoost:** Binary Classifier với hyperparameter tuning (Optuna, 50 trials).
-   * **Model 2 — LightGBM:** Binary Classifier với hyperparameter tuning (Optuna, 50 trials). Thường nhanh hơn XGBoost trên large datasets.
-   * **Model 3 — Random Forest:** Binary Classifier với hyperparameter tuning (Optuna, 50 trials). Ensemble learning kinh điển, ít bị overfit.
+   * **XGBoost:** Sử dụng `scale_pos_weight` (tỷ lệ negative/positive).
+   * So sánh với SMOTE trong experiment log nếu muốn thử thêm baseline.
+8. **Train Multi-Model:** Train **3 models** song song trên **categorical-aware tabular frames**, mỗi model có **experiment run riêng** trên MLflow:
+   * **Model 1 — CatBoost:** Binary Classifier với categorical columns trực tiếp, hyperparameter tuning (Optuna, 50 trials).
+   * **Model 2 — LightGBM:** Binary Classifier với categorical dtype columns, hyperparameter tuning (Optuna, 50 trials). Thường nhanh hơn XGBoost trên large datasets.
+   * **Model 3 — XGBoost:** Binary Classifier với categorical-aware input path, hyperparameter tuning (Optuna, 50 trials).
    * Mỗi model được log đầy đủ metrics (PR-AUC, F1, Precision, Recall) + hyperparameters lên MLflow.
    * **MLflow Experiment Tracking:** Sử dụng cùng 1 experiment name, mỗi model là 1 run → dễ dàng compare trên MLflow UI.
 9. **Model Comparison & Auto-Selection:**
@@ -103,7 +103,7 @@ data/raw/*.csv(.gz) -> Window selection -> Bronze ingestion (chunked, partitione
    * **Threshold tuning:** Chọn threshold tối ưu dựa trên Precision-Recall curve.
 11. **SHAP Analysis (Model Explainability):**
 
-* Tính **Global Feature Importance** bằng `shap.TreeExplainer` trên tập validation (tương thích với cả 3 tree-based models).
+* Tính **Global Feature Importance** bằng `shap.TreeExplainer` trên tập validation (tương thích với **CatBoost, LightGBM, XGBoost**).
 * Lưu SHAP summary plot (bar chart top features) lên MLflow artifacts.
 * Lưu SHAP explainer object (pickle) để phục vụ real-time explanation qua API.
 

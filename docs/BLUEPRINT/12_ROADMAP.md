@@ -11,7 +11,7 @@
 | Tuần | Milestone | Deliverables |
 | --- | --- | --- |
 | **1** | Data Foundation | `data/raw/`, chunked + partitioned `data/bronze/`, partition-aware `data/silver/`, config paths theo directory semantics, timestamp contract (`source_event_time`, `replay_time`, `prediction_time`), DVC init + MinIO remote setup + bronze memory benchmark report |
-| **2** | Training Pipeline | Global session index, session-boundary split, snapshot dataset builder, 10-minute horizon labeling, `data/gold/` artifacts, feature engineering, **multi-model training (XGBoost, LightGBM, Random Forest)**, model comparison & auto-selection, SHAP analysis, MLflow integration, **Data Lineage**, **Model Validation Gate** |
+| **2** | Training Pipeline | Global session index, session-boundary split, snapshot dataset builder, 10-minute horizon labeling, `data/gold/` artifacts, feature engineering, **multi-model training (CatBoost, LightGBM, XGBoost)**, model comparison & auto-selection, SHAP analysis, MLflow integration, **Data Lineage**, **Model Validation Gate** |
 | **3** | Stream Processing | Quix Streams processor, session-scoped Redis feature store, Kafka topics, timestamp preservation, **cache invalidation logic** |
 | **4** | Serving & API | FastAPI (predict + explain + health) theo `user_session`, security (API Key + rate limit), **Model Hot-Reload**, **Prediction Caching**, unit tests |
 | **5** | Frontend & Dashboard | Streamlit User App + Admin Dashboard (tích hợp SHAP visualization) |

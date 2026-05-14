@@ -38,6 +38,8 @@ Các feature chính:
 
 > **Quy tắc train/serve alignment:** Mọi feature offline ở trên phải có online equivalent được cập nhật incrementally theo cùng semantics. Không dùng bất kỳ thông tin "cuối session" nào trong training nếu online serving không nhìn thấy thông tin đó tại thời điểm `t`.
 
+> **Categorical-aware training contract:** `category_id`, `category_code`, và `brand` được giữ nguyên như categorical inputs cho training pipeline. Chúng không bị loại bỏ khỏi gold snapshot frame và cũng không được ép toàn bộ sang `float32` trước khi vào model-specific preprocessing.
+
 > **Optional feature — `has_brand_info` (cần verify qua EDA trước khi thêm):** `1` nếu session có ít nhất 1 sản phẩm có thông tin brand, else `0`. Xem `notebook-planned/02_feature_experiment.ipynb` để đánh giá correlation với purchase intent trước khi commit vào feature set chính thức.
 >
 > **Optional feature — `price_std` (cần verify qua EDA trước khi thêm):** Độ lệch chuẩn giá sản phẩm đã xem đến thời điểm `t`. Để tính online, cần lưu thêm `price_sum_sq` trong Redis (tổng bình phương giá), sau đó tính: `std = sqrt(price_sum_sq / view_count - avg_price_viewed²)`. Nếu EDA cho thấy feature importance cao thì thêm vào Redis keys.

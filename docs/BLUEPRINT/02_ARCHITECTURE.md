@@ -233,7 +233,7 @@ services:
 | **Historical DB** | **PostgreSQL** | Persistent storage cho events và analytics. Chỉ là operational/audit store, không train trực tiếp. |
 | **Object Storage** | **MinIO** (S3-compatible) | Remote storage cho artifacts lớn của data lake và DVC cache/object store. |
 | **Data Versioning** | **DVC** | Version hóa artifacts `raw/bronze/silver/gold`, đảm bảo reproducibility theo revision. |
-| **Model** | **XGBoost, LightGBM, Random Forest** | Multi-Model Experimentation — Train & compare 3 models, auto-select best cho Purchase Prediction. |
+| **Model** | **CatBoost, LightGBM, XGBoost** | Multi-Model Experimentation — Train & compare 3 models trên categorical-aware tabular inputs, auto-select best cho Purchase Prediction. |
 | **Explainability** | **SHAP** (TreeExplainer) | Giải thích prediction — tại sao model dự đoán user sẽ mua. |
 | **MLOps** | **MLflow** | Model registry + experiment tracking + metrics/artifacts của run. |
 | **Serving** | **FastAPI** | Prediction API + Explainability API. |

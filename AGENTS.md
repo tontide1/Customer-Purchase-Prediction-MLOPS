@@ -16,14 +16,14 @@
   - `training/src/gold.py` writes `data/gold/train.parquet`, `data/gold/val.parquet`, `data/gold/test.parquet`
   - `shared/parquet.py` holds the shared parquet file/dataset reader
 - **Sprint 2b** (training pipeline) is implemented in branch `feature/sprint2b`:
-  - 7 new training deps: scikit-learn, xgboost, lightgbm, mlflow, shap, optuna, matplotlib
+  - training deps: scikit-learn, xgboost, lightgbm, catboost, mlflow, shap, optuna, matplotlib
   - MLflow service in `docker-compose.yml` (port 5000, SQLite backend, named volume)
   - MLflow/Optuna configs in `training/src/config.py` (env-aware via `os.getenv()`)
   - `training/src/evaluate.py`: `compute_metrics()` returns `tuple[dict, float]` — metrics dict + threshold
   - `training/src/model_validation.py`: fail-closed validation gate with manual override
   - `training/src/data_lineage.py`: manifest hashing (chunked) + row counting via metadata
   - `training/src/explainability.py`: SHAP artifacts + summary plot for winner model
-  - `training/src/train.py`: orchestration (XGBoost, LightGBM, RandomForest + Optuna + MLflow)
+  - `training/src/train.py`: orchestration (CatBoost, LightGBM, XGBoost + Optuna + MLflow)
   - `dvc.yaml` has `train` stage depending on gold outputs
   - Gold streaming refactor: uses `pq.ParquetWriter` to avoid OOM on 42M rows
   - Gold files are file-based (`data/bronze/events.parquet`, `data/gold/*.parquet`) not directories
@@ -33,9 +33,12 @@
   - `training/src/evaluate.py`, `training/src/model_validation.py`, `training/src/data_lineage.py`
   - `training/src/explainability.py`, `training/src/train.py`
   - `shared/constants.py`, `shared/schemas.py`, `shared/parquet.py`
-  - `training/tests/` (73 tests total across 10 test files)
+  - `training/tests/` (expanded Week 2 coverage across training, explainability, lineage, and data-lake contracts)
   - `dvc.yaml` (`bronze` -> `silver` -> `session_split` -> `gold` -> `train`)
 - Infra scaffold: `docker-compose.yml` (MinIO + MLflow) + `infra/minio/init-bucket.sh`
+  - MLflow metadata uses SQLite in the `mlflow_backend` volume.
+  - MLflow run artifacts use MinIO/S3 at `s3://mlops-artifacts/mlflow` via the MLflow artifact proxy.
+  - Existing MLflow experiments keep their original artifact root; reset `mlflow_backend` or use a new experiment name after changing artifact storage.
 - Repo-level packaging/tooling:
   - `pyproject.toml` with `shared*` and `training*`, runtime/optional deps, pytest, Ruff, mypy
   - `.pre-commit-config.yaml`: hygiene + `ruff-check` + `ruff-format`
@@ -78,7 +81,8 @@
 - `compute_metrics()` returns `tuple[dict, float]` — metrics dict + threshold. The dict contains `confusion_matrix` (numpy array) which must be filtered out before `mlflow.log_metrics()` (only accepts scalars).
 - Gold streaming: use `pa.Table.from_pydict(data, schema=schema)` not `pl.DataFrame().to_arrow()` for ParquetWriter input; Polars type inference breaks on null columns.
 - LightGBM v4.x: `is_unbalance` conflicts with `scale_pos_weight` — use one or the other, not both.
-- SHAP binary classification with RandomForest produces 3D array `(n_samples, n_features, n_classes)` — extract class 1 via `shap_values[:, :, 1]`.
+- Categorical-aware training keeps `category_id`, `category_code`, and `brand` as first-class inputs; do not coerce the full frame to `float32` before model-specific preprocessing.
+- SHAP binary classification can return list or 3D array outputs across CatBoost/LightGBM/XGBoost; extract class 1 via `shap_values[:, :, 1]` when the explainer returns a 3D array.
 
 ## Contracts to preserve when touching architecture/docs
 

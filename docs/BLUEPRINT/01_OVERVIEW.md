@@ -40,6 +40,7 @@ trong thời gian thực với độ trễ **< 1 giây**.
 * Các file tháng trong raw source pool chỉ là đơn vị lưu trữ/ingestion của nguồn dữ liệu, không phải boundary logic cho split train/val/test.
 * **Các trường quan trọng:** `event_time`, `event_type`, `product_id`, `category_id`, `category_code`, `brand`, `price`, `user_id`, `user_session`.
 * **Quy ước timestamp trong hệ thống:** `event_time` từ Kaggle được preserve thành `source_event_time`; simulator thêm `replay_time`; FastAPI thêm `prediction_time` trong response.
+* **Week 2 training contract:** `category_id`, `category_code`, và `brand` được giữ như categorical inputs cho `CatBoost`, `LightGBM`, và `XGBoost`; không ép toàn bộ gold frame sang `float32`.
 
 ## 2.2. Data Lake Layers (Raw -> Bronze -> Silver -> Gold)
 

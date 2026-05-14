@@ -181,7 +181,7 @@ REAL-TIME-ECOMMERCE-INTENT-SYSTEM/
 | **Raw Data Input** | `dataset/*.csv.gz` | `data/raw/` | `data/raw/` là raw source pool dùng cho training/replay/retraining materialization |
 | **Analysis & EDA** | `notebook/eda.ipynb` | `notebook/` hoặc `notebook-planned/` | Tái sử dụng insights từ EDA hiện có |
 | **Feature Experiments** | (không có) | `notebook-planned/02_feature_experiment.ipynb` | Cần tạo để experiment trước khi commit features |
-| **Model Experiments** | (không có) | `notebook-planned/03_model_experiment.ipynb` | So sánh XGBoost vs LightGBM vs Random Forest |
+| **Model Experiments** | (không có) | `notebook-planned/03_model_experiment.ipynb` | So sánh CatBoost vs LightGBM vs XGBoost trên categorical-aware frames |
 | **Bronze Artifacts** | (không có) | `data/bronze/` | Dataset directory cho parquet bronze, có thể partition theo file/tháng |
 | **Silver Artifacts** | (không có) | `data/silver/` | Dataset directory cho parquet silver, phục vụ session indexing |
 | **Gold Artifacts** | (không có) | `data/gold/train_snapshots.parquet` | Output của `training/src/gold.py`, stream snapshots từ silver đã sort sẵn |

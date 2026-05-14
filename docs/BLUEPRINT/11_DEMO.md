@@ -24,10 +24,10 @@ Khi báo cáo với giảng viên, thực hiện theo trình tự:
 
 * Chạy `train.py` (hoặc load model đã train sẵn).
 * Mở **MLflow UI** → Show experiment tracking:
-  * **So sánh 3 models** (XGBoost, LightGBM, Random Forest) — bảng so sánh metrics ngay trên MLflow UI.
+  * **So sánh 3 models** (CatBoost, LightGBM, XGBoost) — bảng so sánh metrics ngay trên MLflow UI.
   * Show metrics từng model: PR-AUC, F1-Score, Confusion Matrix.
   * Highlight **best model được tự động chọn** và register lên Production.
-  * Show model versioning (v1, v2, ...) và model type (XGBoost/LightGBM/Random Forest).
+  * Show model versioning (v1, v2, ...) và model type (CatBoost/LightGBM/XGBoost).
   * **Show SHAP Feature Importance chart** (artifact trên MLflow).
 * Giải thích: *"Hệ thống tự động train 3 models, so sánh hiệu suất, và chọn model tốt nhất. Trong lần này, [model_name] đạt PR-AUC cao nhất. Feature quan trọng nhất là cart_to_view_ratio."*
 
@@ -119,7 +119,7 @@ Khi báo cáo với giảng viên, thực hiện theo trình tự:
 
 * Tổng kết kiến trúc: Event-Driven → Stream Processing → Real-time Prediction + Explanation cho `user_session`.
 * Nhấn mạnh **Multi-Model Experimentation + Closed-Loop MLOps** — điểm khác biệt:
-  * **Multi-Model:** Train & compare 3 models (XGBoost, LightGBM, Random Forest), tự động chọn best model.
+  * **Multi-Model:** Train & compare 3 models (CatBoost, LightGBM, XGBoost), tự động chọn best model.
   * **MLflow:** Model versioning + experiment tracking + **Data Lineage** + **model comparison UI**.
   * **Model Validation Gate:** Tự động so sánh model mới vs cũ, chặn model kém.
   * **Model Hot-Reload:** Zero-downtime model update (background thread poll mỗi 5 phút).

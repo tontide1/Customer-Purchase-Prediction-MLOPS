@@ -234,7 +234,7 @@ def test_compute_metrics_structure(binary_predictions):
     """Test that compute_metrics returns (metrics_dict, threshold) tuple"""
     y_true, y_pred = binary_predictions
     metrics, threshold = compute_metrics(y_true, y_pred)
-    
+
     required_keys = ["pr_auc", "f1", "precision", "recall", "confusion_matrix", "optimal_threshold"]
     for key in required_keys:
         assert key in metrics, f"Missing key: {key}"
@@ -245,23 +245,23 @@ def test_pr_auc_in_valid_range(binary_predictions):
     """Test that PR-AUC is between 0 and 1"""
     y_true, y_pred = binary_predictions
     metrics, _ = compute_metrics(y_true, y_pred)
-    
+
     assert 0.0 <= metrics["pr_auc"] <= 1.0
 
 def test_compute_optimal_threshold(binary_predictions):
     """Test threshold selection from precision-recall curve"""
     y_true, y_pred = binary_predictions
     threshold = compute_optimal_threshold(y_true, y_pred)
-    
+
     assert isinstance(threshold, (float, np.floating))
     assert 0.0 <= threshold <= 1.0
-    
+
 def test_confusion_matrix_format(binary_predictions):
     """Test that confusion matrix has correct structure"""
     y_true, y_pred = binary_predictions
     metrics, _ = compute_metrics(y_true, y_pred)
     cm = metrics["confusion_matrix"]
-    
+
     assert cm.shape == (2, 2), "Confusion matrix should be 2x2"
     assert cm.sum() == len(y_true), "Confusion matrix sum should equal sample count"
 ```
@@ -292,21 +292,21 @@ from sklearn.metrics import (
 def compute_metrics(y_true: np.ndarray, y_pred_proba: np.ndarray) -> tuple[dict, float]:
     """
     Compute binary classification metrics.
-    
+
     Returns tuple of (metrics_dict, threshold) where:
     - metrics_dict keys: pr_auc, f1, precision, recall, confusion_matrix, optimal_threshold
     - threshold: F1-maximizing threshold from PR curve
-    
+
     Args:
         y_true: Binary labels (0 or 1)
         y_pred_proba: Predicted probabilities for class 1
     """
     precision_vals, recall_vals, _ = precision_recall_curve(y_true, y_pred_proba)
     pr_auc = auc(recall_vals, precision_vals)
-    
+
     threshold = compute_optimal_threshold(y_true, y_pred_proba)
     y_pred = (y_pred_proba >= threshold).astype(int)
-    
+
     return {
         "pr_auc": float(pr_auc),
         "f1": float(f1_score(y_true, y_pred)),
@@ -320,19 +320,19 @@ def compute_metrics(y_true: np.ndarray, y_pred_proba: np.ndarray) -> tuple[dict,
 def compute_optimal_threshold(y_true: np.ndarray, y_pred_proba: np.ndarray) -> float:
     """
     Select threshold that maximizes F1 score on precision-recall curve.
-    
+
     Args:
         y_true: Binary labels
         y_pred_proba: Predicted probabilities
-    
+
     Returns:
         Optimal threshold value
     """
     precision_vals, recall_vals, thresholds = precision_recall_curve(y_true, y_pred_proba)
-    
+
     # Compute F1 for each threshold (skip when precision+recall=0 to avoid /0)
     f1_scores = 2 * (precision_vals * recall_vals) / (precision_vals + recall_vals + 1e-10)
-    
+
     best_idx = np.argmax(f1_scores)
     if best_idx < len(thresholds):
         return float(thresholds[best_idx])
@@ -503,13 +503,13 @@ def validate_model_gate(
 ) -> bool:
     """
     Determine if new model should be promoted to production.
-    
+
     Fail-closed contract:
     - If production model doesn't exist: PASS
     - If new model PR-AUC < min_threshold: FAIL
     - If new model PR-AUC >= production model PR-AUC: PASS
     - Otherwise: FAIL (unless manual override)
-    
+
     Args:
         new_model_pr_auc: Validation PR-AUC of new model
         production_model_pr_auc: Validation PR-AUC of current production model
@@ -518,7 +518,7 @@ def validate_model_gate(
         override_by: Email/ID of person approving override
         override_reason: Reason for override
         override_time: Timestamp of override decision
-    
+
     Returns:
         True if model should be promoted, False otherwise
     """
@@ -532,17 +532,17 @@ def validate_model_gate(
                 raise ValueError("All audit fields required for override: override_by, override_reason, override_time")
             return True
         return False
-    
+
     # Has production model: new must be better or equal
     if new_model_pr_auc >= production_model_pr_auc:
         return True
-    
+
     # New model is worse: check override
     if override_enabled:
         if not all([override_by, override_reason, override_time]):
             raise ValueError("All audit fields required for override: override_by, override_reason, override_time")
         return True
-    
+
     return False
 ```
 
@@ -590,7 +590,7 @@ def compute_manifest_hash(data_path: str) -> str:
         with open(f, "rb") as fp:
             content_hash = hashlib.md5(fp.read()).hexdigest()
             file_hashes.append(content_hash)
-    
+
     combined = "".join(file_hashes)
     return hashlib.md5(combined.encode()).hexdigest()
 
@@ -606,7 +606,7 @@ def gather_lineage_metadata(
 ) -> Dict[str, Any]:
     """
     Gather lightweight metadata from sprint inputs for traceability.
-    
+
     Args:
         train_path: Path to train.parquet
         val_path: Path to val.parquet
@@ -615,7 +615,7 @@ def gather_lineage_metadata(
         window_start_utc: Data collection window start
         window_end_utc: Data collection window end
         dvc_revision: DVC pipeline revision
-    
+
     Returns:
         Dictionary of lineage metadata
     """
@@ -686,7 +686,7 @@ def test_shap_artifacts_structure(trained_model):
     """Test that SHAP artifacts include summary plot and explainer"""
     model, X, y = trained_model
     artifacts = generate_shap_artifacts(model, X)
-    
+
     assert "explainer" in artifacts
     assert "summary_plot_path" in artifacts
     assert "summary_values" in artifacts
@@ -696,10 +696,10 @@ def test_shap_explainer_can_predict(trained_model):
     """Test that SHAP explainer produces values for samples"""
     model, X, y = trained_model
     artifacts = generate_shap_artifacts(model, X)
-    
+
     explainer = artifacts["explainer"]
     shap_values = explainer.shap_values(X[:5])
-    
+
     # For binary classification, shap_values is a list of 2 arrays
     assert len(shap_values) == 2
     assert shap_values[0].shape == (5, 5)  # 5 samples, 5 features
@@ -709,7 +709,7 @@ def test_summary_values_shape(trained_model):
     """Test that summary values have correct shape"""
     model, X, y = trained_model
     artifacts = generate_shap_artifacts(model, X)
-    
+
     summary = artifacts["summary_values"]
     assert isinstance(summary, np.ndarray)
     assert summary.ndim == 2
@@ -740,12 +740,12 @@ def generate_shap_artifacts(
 ) -> Dict[str, Any]:
     """
     Generate SHAP artifacts for a tree model.
-    
+
     Args:
         model: Trained tree model (XGBoost, LightGBM, RandomForest)
         X_background: Background data for SHAP explainer
         X_test: Optional test data for summary plot
-    
+
     Returns:
         Dictionary with:
         - 'explainer': TreeExplainer object (can be pickled)
@@ -754,20 +754,20 @@ def generate_shap_artifacts(
     """
     explainer = shap.TreeExplainer(model)
     shap_values = explainer.shap_values(X_background)
-    
+
     # For binary classification, shap_values is list of 2 arrays
     # Use class 1 (positive class)
     if isinstance(shap_values, list):
         summary_values = shap_values[1]
     else:
         summary_values = shap_values
-    
+
     artifacts = {
         "explainer": explainer,
         "summary_values": summary_values,
         "model": model,
     }
-    
+
     return artifacts
 
 
@@ -826,7 +826,7 @@ from training.src.train import (
 def gold_data(tmp_path):
     """Fixture: minimal gold data (train, val, test)"""
     from shared.schemas import GOLD_SCHEMA
-    
+
     # Create minimal data
     n_samples = 100
     data = {
@@ -838,17 +838,17 @@ def gold_data(tmp_path):
         "price": np.random.rand(n_samples) * 100,
         "label": np.random.randint(0, 2, n_samples),
     }
-    
+
     df = pd.DataFrame(data)
-    
+
     train_file = tmp_path / "train.parquet"
     val_file = tmp_path / "val.parquet"
     test_file = tmp_path / "test.parquet"
-    
+
     df.to_parquet(train_file)
     df.to_parquet(val_file)
     df.to_parquet(test_file)
-    
+
     return {
         "train_path": str(train_file),
         "val_path": str(val_file),
@@ -862,7 +862,7 @@ def test_build_train_matrix(gold_data):
         gold_data["train_path"],
         gold_data["val_path"],
     )
-    
+
     assert X_train.shape[0] > 0
     assert y_train.shape[0] == X_train.shape[0]
     assert X_val.shape[1] == X_train.shape[1]
@@ -874,17 +874,17 @@ def test_train_three_models(gold_data):
         gold_data["train_path"],
         gold_data["val_path"],
     )
-    
+
     # Mock MLflow
     with patch("training.src.train.mlflow"):
         xgb_model, xgb_metrics = train_xgboost_candidate(X_train, y_train, X_val, y_val, n_trials=2)
         assert xgb_model is not None
         assert "pr_auc" in xgb_metrics
-        
+
         lgb_model, lgb_metrics = train_lightgbm_candidate(X_train, y_train, X_val, y_val, n_trials=2)
         assert lgb_model is not None
         assert "pr_auc" in lgb_metrics
-        
+
         rf_model, rf_metrics = train_random_forest_candidate(X_train, y_train, X_val, y_val)
         assert rf_model is not None
         assert "pr_auc" in rf_metrics
@@ -897,7 +897,7 @@ def test_find_best_model_by_validation_pr_auc():
         "lightgbm": {"model": "lgb", "metrics": {"pr_auc": 0.75}},
         "random_forest": {"model": "rf", "metrics": {"pr_auc": 0.68}},
     }
-    
+
     winner_name, winner_data = find_best_model_by_validation_pr_auc(results)
     assert winner_name == "lightgbm"
     assert winner_data["metrics"]["pr_auc"] == 0.75
@@ -953,11 +953,11 @@ def load_gold_data(train_path: str, val_path: str, test_path: str):
     train_df = pd.read_parquet(train_path)
     val_df = pd.read_parquet(val_path)
     test_df = pd.read_parquet(test_path)
-    
+
     assert not train_df.empty, "Train data is empty"
     assert not val_df.empty, "Validation data is empty"
     assert not test_df.empty, "Test data is empty"
-    
+
     return train_df, val_df, test_df
 
 
@@ -967,26 +967,26 @@ def build_train_matrix(
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Load and prepare training matrices.
-    
+
     Returns:
         (X_train, y_train, X_val, y_val)
     """
     train_df, val_df, _ = load_gold_data(train_path, val_path, train_path)
-    
+
     # Identify feature columns (everything except target)
     target_col = "label"
     feature_cols = [col for col in train_df.columns if col != target_col]
-    
+
     # Select numeric features only (drop user_id, user_session, event_type, product_id)
-    feature_cols = [col for col in feature_cols if col not in 
+    feature_cols = [col for col in feature_cols if col not in
                    ["user_id", "user_session", "event_type", "product_id", "source_event_time"]]
-    
+
     X_train = train_df[feature_cols].fillna(0).values.astype(np.float32)
     y_train = train_df[target_col].values.astype(int)
-    
+
     X_val = val_df[feature_cols].fillna(0).values.astype(np.float32)
     y_val = val_df[target_col].values.astype(int)
-    
+
     return X_train, y_train, X_val, y_val
 
 
@@ -998,7 +998,7 @@ def train_xgboost_candidate(
     n_trials: int = OPTUNA_TARGET_TRIALS,
 ) -> Tuple[XGBClassifier, Dict[str, float]]:
     """Train XGBoost with Optuna hyperparameter search."""
-    
+
     def objective(trial):
         params = {
             "max_depth": trial.suggest_int("max_depth", 3, 10),
@@ -1007,27 +1007,27 @@ def train_xgboost_candidate(
             "scale_pos_weight": trial.suggest_float("scale_pos_weight", 0.5, 5.0),
             "random_state": 42,
         }
-        
+
         model = XGBClassifier(**params)
         model.fit(X_train, y_train, verbose=False)
         y_pred_proba = model.predict_proba(X_val)[:, 1]
         metrics, _ = compute_metrics(y_val, y_pred_proba)
-        
+
         return metrics["pr_auc"]
-    
+
     sampler = TPESampler(seed=42)
     study = optuna.create_study(sampler=sampler, direction="maximize")
     study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
-    
+
     best_params = study.best_params
     best_params["random_state"] = 42
-    
+
     model = XGBClassifier(**best_params)
     model.fit(X_train, y_train, verbose=False)
-    
+
     y_pred_proba = model.predict_proba(X_val)[:, 1]
     metrics, _ = compute_metrics(y_val, y_pred_proba)
-    
+
     return model, metrics
 
 
@@ -1039,11 +1039,11 @@ def train_lightgbm_candidate(
     n_trials: int = OPTUNA_TARGET_TRIALS,
 ) -> Tuple[LGBMClassifier, Dict[str, float]]:
     """Train LightGBM with Optuna hyperparameter search.
-    
+
     NOTE: LightGBM v4.x does NOT allow is_unbalance=True with scale_pos_weight.
     Use only scale_pos_weight in Optuna params to avoid conflict.
     """
-    
+
     def objective(trial):
         params = {
             "max_depth": trial.suggest_int("max_depth", 3, 10),
@@ -1052,27 +1052,27 @@ def train_lightgbm_candidate(
             "scale_pos_weight": trial.suggest_float("scale_pos_weight", 0.5, 5.0),
             "random_state": 42,
         }
-        
+
         model = LGBMClassifier(**params)
         model.fit(X_train, y_train, verbose=-1)
         y_pred_proba = model.predict_proba(X_val)[:, 1]
         metrics, _ = compute_metrics(y_val, y_pred_proba)
-        
+
         return metrics["pr_auc"]
-    
+
     sampler = TPESampler(seed=42)
     study = optuna.create_study(sampler=sampler, direction="maximize")
     study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
-    
+
     best_params = study.best_params
     best_params["random_state"] = 42
-    
+
     model = LGBMClassifier(**best_params)
     model.fit(X_train, y_train, verbose=-1)
-    
+
     y_pred_proba = model.predict_proba(X_val)[:, 1]
     metrics, _ = compute_metrics(y_val, y_pred_proba)
-    
+
     return model, metrics
 
 
@@ -1091,10 +1091,10 @@ def train_random_forest_candidate(
         n_jobs=-1,
     )
     model.fit(X_train, y_train)
-    
+
     y_pred_proba = model.predict_proba(X_val)[:, 1]
     metrics, _ = compute_metrics(y_val, y_pred_proba)
-    
+
     return model, metrics
 
 
@@ -1111,57 +1111,57 @@ def main():
     parser.add_argument("--test", required=True, help="Path to test.parquet")
     parser.add_argument("--session-split-map", required=True, help="Path to session_split_map.parquet")
     parser.add_argument("--smoke-mode", action="store_true", help="Use smoke budgets")
-    
+
     args = parser.parse_args()
-    
+
     mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
     mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
-    
+
     logger.info("Loading gold data...")
     X_train, y_train, X_val, y_val = build_train_matrix(args.train, args.val)
-    
+
     n_trials = OPTUNA_SMOKE_TRIALS if args.smoke_mode else OPTUNA_TARGET_TRIALS
-    
+
     logger.info(f"Training 3 candidates (smoke={args.smoke_mode}, trials={n_trials})...")
-    
+
     results = {}
-    
+
     # Train XGBoost
     with mlflow.start_run(run_name="xgboost"):
         xgb_model, xgb_metrics = train_xgboost_candidate(X_train, y_train, X_val, y_val, n_trials)
         mlflow.log_metrics(xgb_metrics)
         mlflow.xgboost.log_model(xgb_model, "model")
         results["xgboost"] = {"model": xgb_model, "metrics": xgb_metrics}
-    
+
     # Train LightGBM
     with mlflow.start_run(run_name="lightgbm"):
         lgb_model, lgb_metrics = train_lightgbm_candidate(X_train, y_train, X_val, y_val, n_trials)
         mlflow.log_metrics(lgb_metrics)
         mlflow.lightgbm.log_model(lgb_model, "model")
         results["lightgbm"] = {"model": lgb_model, "metrics": lgb_metrics}
-    
+
     # Train Random Forest
     with mlflow.start_run(run_name="random_forest"):
         rf_model, rf_metrics = train_random_forest_candidate(X_train, y_train, X_val, y_val)
         mlflow.log_metrics(rf_metrics)
         mlflow.sklearn.log_model(rf_model, "model")
         results["random_forest"] = {"model": rf_model, "metrics": rf_metrics}
-    
+
     # Find winner
     winner_name, winner_data = find_best_model_by_validation_pr_auc(results)
     logger.info(f"Winner: {winner_name} (PR-AUC: {winner_data['metrics']['pr_auc']:.4f})")
-    
+
     # Validation gate
     gate_pass = validate_model_gate(
         new_model_pr_auc=winner_data["metrics"]["pr_auc"],
         production_model_pr_auc=None,
         min_threshold=MIN_VALIDATION_PR_AUC_THRESHOLD,
     )
-    
+
     if not gate_pass:
         logger.error("Model failed validation gate")
         return 1
-    
+
     logger.info("Model passed validation gate")
     return 0
 

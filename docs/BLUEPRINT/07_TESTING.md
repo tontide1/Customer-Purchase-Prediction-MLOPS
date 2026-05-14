@@ -33,6 +33,11 @@
 * **Window Isolation:** Test training window và replay/demo window không bị trộn dữ liệu.
 * **Materialization Strategy Invariance:** Test thay đổi cách materialize bronze/silver không làm đổi exact counts và downstream labeling semantics.
 * **Gold Batch Continuity:** Test gold session continuity được giữ xuyên qua ranh giới parquet batch boundaries khi stream snapshots từ silver đã sort.
+* **Categorical Training Contract:** Test `prepare_training_frame()` giữ nguyên `category_id`, `category_code`, `brand` như categorical inputs và không ép toàn bộ frame sang `float32`.
+* **Categorical Unseen Handling:** Test unseen/null category values được normalize deterministically trước khi vào CatBoost/LightGBM/XGBoost.
+* **Three-Model Training:** Test `CatBoost`, `LightGBM`, và `XGBoost` đều train được từ cùng shared frame contract.
+* **Explainability Coverage:** Test SHAP artifact generation cho cả 3 tree-model families trên shared training outputs.
+* **Lineage Metadata:** Test `gather_lineage_metadata()` và manifest hash vẫn trả metadata/row counts đúng khi gold inputs đổi.
 * **Stale Contract Detection:** Test/lint scan fail nếu docs/config còn reference contract cũ như `data/bronze/events.parquet`, `data/silver/events.parquet`, `raw_data_path`, `bronze_data_path`, `silver_data_path`.
 
 ---
