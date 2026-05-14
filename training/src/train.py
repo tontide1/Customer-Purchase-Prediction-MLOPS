@@ -59,9 +59,13 @@ class PreparedTrainingData:
     categorical_artifacts: CategoricalEncodingArtifacts
 
 
-def _log_metrics(metrics: dict, confusion_matrix_name: str) -> None:
+def _log_metrics(
+    metrics: dict,
+    confusion_matrix_name: str,
+    metric_prefix: str = "",
+) -> None:
     scalar_metrics = {
-        key: float(value)
+        f"{metric_prefix}{key}": float(value)
         for key, value in metrics.items()
         if isinstance(value, (int, float, np.floating))
     }
@@ -80,6 +84,26 @@ def _resolve_training_device(
     return (
         TRAIN_DEVICE if device is None else device,
         GPU_DEVICE_ID if gpu_device_id is None else str(gpu_device_id),
+    )
+
+
+def _is_gpu_training_error(exc: RuntimeError) -> bool:
+    """Return True when a RuntimeError looks like a GPU/device failure."""
+
+    message = str(exc).lower()
+    return any(
+        token in message
+        for token in (
+            "cuda",
+            "cudnn",
+            "cublas",
+            "device-side assert",
+            "device ordinal",
+            "no gpus are available",
+            "gpu",
+            "hip error",
+            "out of memory",
+        )
     )
 
 
@@ -150,9 +174,7 @@ def _catboost_params(trial: optuna.Trial, device: str, gpu_device_id: str) -> di
     return params
 
 
-def _lightgbm_params(
-    trial: optuna.Trial, device: str, gpu_device_id: str
-) -> dict:
+def _lightgbm_params(trial: optuna.Trial, device: str, gpu_device_id: str) -> dict:
     use_unbalance = trial.suggest_categorical("is_unbalance", [True, False])
     params = {
         "max_depth": trial.suggest_int("max_depth", 3, 10),
@@ -227,10 +249,13 @@ def _train_candidate_with_device_policy(
 
     try:
         return run("gpu")
-    except Exception as exc:
+    except RuntimeError as exc:
+        if not _is_gpu_training_error(exc):
+            raise
         logger.warning(
-            "%s GPU training failed, retrying on CPU: %s",
+            "%s GPU training failed with %s: %s, retrying on CPU",
             candidate_name,
+            type(exc).__name__,
             exc,
         )
         return run("cpu")
@@ -361,10 +386,15 @@ def find_best_model_by_validation_pr_auc(results: Dict[str, Dict]) -> tuple[str,
     return best_name, results[best_name]
 
 
-def evaluate_winner_on_test(model, test_features: pd.DataFrame, test_target: pd.Series) -> dict:
+def evaluate_winner_on_test(
+    model,
+    test_features: pd.DataFrame,
+    test_target: pd.Series,
+    threshold: float,
+) -> dict:
     """Evaluate the selected winner model on the held-out test set."""
     y_pred_proba = model.predict_proba(test_features)[:, 1]
-    metrics, _ = compute_metrics(test_target, y_pred_proba)
+    metrics, _ = compute_metrics(test_target, y_pred_proba, threshold=threshold)
     return metrics
 
 
@@ -470,6 +500,7 @@ def main() -> int:
         results["xgboost"] = {"model": xgb_model, "metrics": xgb_metrics}
 
     winner_name, winner_data = find_best_model_by_validation_pr_auc(results)
+    winner_threshold = winner_data["metrics"].get("optimal_threshold", 0.5)
     logger.info(
         "Winner: %s (PR-AUC: %.4f)",
         winner_name,
@@ -477,12 +508,18 @@ def main() -> int:
     )
 
     with mlflow.start_run(run_name=f"{winner_name}_test_evaluation"):
+        mlflow.log_dict(lineage_metadata, "lineage/metadata.json")
         test_metrics = evaluate_winner_on_test(
             winner_data["model"],
             data.test_features,
             data.test_target,
+            threshold=winner_threshold,
         )
-        mlflow.log_metrics({f"test_{k}": v for k, v in test_metrics.items() if isinstance(v, (int, float, np.floating))})
+        _log_metrics(
+            test_metrics,
+            f"{winner_name}_test_confusion_matrix.json",
+            metric_prefix="test_",
+        )
     logger.info(
         "Test results for %s: PR-AUC=%.4f, average_precision=%.4f",
         winner_name,

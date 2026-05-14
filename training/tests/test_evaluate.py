@@ -76,3 +76,11 @@ def test_compute_metrics_includes_average_precision(binary_predictions):
         average_precision_score(y_true, y_pred)
     )
     assert metrics["optimal_threshold"] == threshold
+
+
+def test_compute_metrics_uses_provided_threshold(binary_predictions):
+    y_true, y_pred = binary_predictions
+    metrics, threshold = compute_metrics(y_true, y_pred, threshold=0.5)
+
+    assert threshold == pytest.approx(0.5)
+    assert metrics["optimal_threshold"] == pytest.approx(0.5)

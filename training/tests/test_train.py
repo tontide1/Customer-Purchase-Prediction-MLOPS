@@ -92,15 +92,30 @@ def gold_data(tmp_path):
 
 
 class _DummyRun:
+    def __init__(self, mlflow, run_name):
+        self.mlflow = mlflow
+        self.run_name = run_name
+
     def __enter__(self):
+        run = {
+            "run_name": self.run_name,
+            "metrics": [],
+            "dicts": [],
+            "texts": [],
+        }
+        self.mlflow.runs.append(run)
+        self.mlflow._current_run = run
         return self
 
     def __exit__(self, exc_type, exc, tb):
+        self.mlflow._current_run = None
         return False
 
 
 class _FakeMlflow:
     def __init__(self):
+        self.runs = []
+        self._current_run = None
         self.sklearn = SimpleNamespace(log_model=lambda *args, **kwargs: None)
 
     def set_tracking_uri(self, *args, **kwargs):
@@ -110,15 +125,21 @@ class _FakeMlflow:
         return None
 
     def start_run(self, *args, **kwargs):
-        return _DummyRun()
+        return _DummyRun(self, kwargs.get("run_name"))
 
     def log_dict(self, *args, **kwargs):
+        if self._current_run is not None:
+            self._current_run["dicts"].append((args, kwargs))
         return None
 
     def log_metrics(self, *args, **kwargs):
+        if self._current_run is not None and args:
+            self._current_run["metrics"].append(args[0])
         return None
 
     def log_text(self, *args, **kwargs):
+        if self._current_run is not None:
+            self._current_run["texts"].append((args, kwargs))
         return None
 
 
@@ -143,7 +164,10 @@ def test_build_training_data(gold_data):
     assert data.train_target.shape[0] == data.train_features.shape[0]
     assert data.val_target.shape[0] == data.val_features.shape[0]
     assert data.categorical_columns == [
-        "category_id", "category_code", "brand", "event_type",
+        "category_id",
+        "category_code",
+        "brand",
+        "event_type",
     ]
     assert data.numeric_columns == [
         "total_views",
@@ -284,14 +308,22 @@ def test_smoke_and_full_runs_pass_same_device_policy(gold_data, monkeypatch):
 
     def fake_train(*args, **kwargs):
         recorded_devices.append(kwargs["device"])
-        return _FakeModel(), {"pr_auc": 0.8, "average_precision": 0.8, "confusion_matrix": np.array([[1, 0], [0, 1]])}
+        return _FakeModel(), {
+            "pr_auc": 0.8,
+            "average_precision": 0.8,
+            "confusion_matrix": np.array([[1, 0], [0, 1]]),
+        }
 
     monkeypatch.setattr("training.src.train.train_catboost_candidate", fake_train)
     monkeypatch.setattr("training.src.train.train_lightgbm_candidate", fake_train)
     monkeypatch.setattr("training.src.train.train_xgboost_candidate", fake_train)
     monkeypatch.setattr(
         "training.src.train.evaluate_winner_on_test",
-        lambda *args, **kwargs: {"pr_auc": 0.8, "average_precision": 0.8, "confusion_matrix": np.array([[1, 0], [0, 1]])},
+        lambda *args, **kwargs: {
+            "pr_auc": 0.8,
+            "average_precision": 0.8,
+            "confusion_matrix": np.array([[1, 0], [0, 1]]),
+        },
     )
 
     monkeypatch.setattr(
@@ -325,22 +357,36 @@ def test_auto_device_falls_back_to_cpu_when_gpu_fails(gold_data, monkeypatch):
     monkeypatch.setattr("training.src.train.OPTUNA_SMOKE_TRIALS", 1)
 
     calls = {"cat": 0}
+    recorded_devices: list[str] = []
 
     def cat_train(*args, **kwargs):
         calls["cat"] += 1
+        recorded_devices.append(kwargs["device"])
         if calls["cat"] == 1:
             raise RuntimeError("GPU unavailable")
-        return _FakeModel(), {"pr_auc": 0.8, "average_precision": 0.8, "confusion_matrix": np.array([[1, 0], [0, 1]])}
+        return _FakeModel(), {
+            "pr_auc": 0.8,
+            "average_precision": 0.8,
+            "confusion_matrix": np.array([[1, 0], [0, 1]]),
+        }
 
     def ok_train(*args, **kwargs):
-        return _FakeModel(), {"pr_auc": 0.8, "average_precision": 0.8, "confusion_matrix": np.array([[1, 0], [0, 1]])}
+        return _FakeModel(), {
+            "pr_auc": 0.8,
+            "average_precision": 0.8,
+            "confusion_matrix": np.array([[1, 0], [0, 1]]),
+        }
 
     monkeypatch.setattr("training.src.train.train_catboost_candidate", cat_train)
     monkeypatch.setattr("training.src.train.train_lightgbm_candidate", ok_train)
     monkeypatch.setattr("training.src.train.train_xgboost_candidate", ok_train)
     monkeypatch.setattr(
         "training.src.train.evaluate_winner_on_test",
-        lambda *args, **kwargs: {"pr_auc": 0.8, "average_precision": 0.8, "confusion_matrix": np.array([[1, 0], [0, 1]])},
+        lambda *args, **kwargs: {
+            "pr_auc": 0.8,
+            "average_precision": 0.8,
+            "confusion_matrix": np.array([[1, 0], [0, 1]]),
+        },
     )
 
     monkeypatch.setattr(
@@ -366,6 +412,7 @@ def test_auto_device_falls_back_to_cpu_when_gpu_fails(gold_data, monkeypatch):
 
     assert main() == 0
     assert calls["cat"] == 2
+    assert recorded_devices == ["gpu", "cpu"]
 
 
 def test_main_logs_test_metrics_for_selected_winner(gold_data, monkeypatch):
@@ -376,11 +423,19 @@ def test_main_logs_test_metrics_for_selected_winner(gold_data, monkeypatch):
     seen_test_eval = {"called": False}
 
     def fake_train(*args, **kwargs):
-        return _FakeModel(), {"pr_auc": 0.9, "average_precision": 0.9, "confusion_matrix": np.array([[1, 0], [0, 1]])}
+        return _FakeModel(), {
+            "pr_auc": 0.9,
+            "average_precision": 0.9,
+            "confusion_matrix": np.array([[1, 0], [0, 1]]),
+        }
 
     def fake_eval_on_test(*args, **kwargs):
         seen_test_eval["called"] = True
-        return {"pr_auc": 0.8, "average_precision": 0.8, "confusion_matrix": np.array([[1, 0], [0, 1]])}
+        return {
+            "pr_auc": 0.8,
+            "average_precision": 0.8,
+            "confusion_matrix": np.array([[1, 0], [0, 1]]),
+        }
 
     monkeypatch.setattr("training.src.train.train_catboost_candidate", fake_train)
     monkeypatch.setattr("training.src.train.train_lightgbm_candidate", fake_train)
@@ -406,3 +461,14 @@ def test_main_logs_test_metrics_for_selected_winner(gold_data, monkeypatch):
 
     assert main() == 0
     assert seen_test_eval["called"] is True
+    assert [run["run_name"] for run in fake_mlflow.runs] == [
+        "catboost",
+        "lightgbm",
+        "xgboost",
+        "catboost_test_evaluation",
+    ]
+    test_run_metrics = {}
+    for batch in fake_mlflow.runs[-1]["metrics"]:
+        test_run_metrics.update(batch)
+    assert "test_pr_auc" in test_run_metrics
+    assert "test_average_precision" in test_run_metrics

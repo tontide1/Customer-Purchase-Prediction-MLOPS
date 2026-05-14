@@ -1,4 +1,4 @@
-"""Model evaluation metrics: PR-AUC, F1, Precision, Recall, threshold selection."""
+"""Model evaluation metrics: PR-AUC, average precision, F1, precision, recall."""
 
 import numpy as np
 from sklearn.metrics import (
@@ -12,7 +12,11 @@ from sklearn.metrics import (
 )
 
 
-def compute_metrics(y_true: np.ndarray, y_pred_proba: np.ndarray) -> tuple[dict, float]:
+def compute_metrics(
+    y_true: np.ndarray,
+    y_pred_proba: np.ndarray,
+    threshold: float | None = None,
+) -> tuple[dict, float]:
     """
     Compute binary classification metrics.
 
@@ -21,14 +25,19 @@ def compute_metrics(y_true: np.ndarray, y_pred_proba: np.ndarray) -> tuple[dict,
         y_pred_proba: Predicted probabilities for class 1
 
     Returns:
-        Tuple of (metrics_dict, optimal_threshold) where metrics_dict contains:
-        pr_auc, f1, precision, recall, confusion_matrix, optimal_threshold
+        Tuple of (metrics_dict, threshold) where metrics_dict contains:
+        pr_auc, average_precision, f1, precision, recall, confusion_matrix,
+        optimal_threshold
     """
     precision_vals, recall_vals, _ = precision_recall_curve(y_true, y_pred_proba)
     pr_auc = auc(recall_vals, precision_vals)
     average_precision = average_precision_score(y_true, y_pred_proba)
 
-    threshold = compute_optimal_threshold(y_true, y_pred_proba)
+    threshold = (
+        compute_optimal_threshold(y_true, y_pred_proba)
+        if threshold is None
+        else float(threshold)
+    )
     y_pred = (y_pred_proba >= threshold).astype(int)
 
     metrics = {
