@@ -144,3 +144,61 @@ stages:
       hash: md5
       md5: 8259539206e15873705dffef72db95a4
       size: 101082163
+  train:
+    cmd: python -m training.src.train --train data/gold/train.parquet --val 
+      data/gold/val.parquet --test data/gold/test.parquet --session-split-map 
+      data/gold/session_split_map.parquet --device auto
+    deps:
+    - path: data/gold/session_split_map.parquet
+      hash: md5
+      md5: bffbcc1c35fe6edaa65099ea48c6dd41
+      size: 7668575
+    - path: data/gold/test.parquet
+      hash: md5
+      md5: 6bd6d45d64467e533cde2e6543fb6732
+      size: 101445695
+    - path: data/gold/train.parquet
+      hash: md5
+      md5: cdf0284a53f155e84f2f7d7845e6421c
+      size: 805997069
+    - path: data/gold/val.parquet
+      hash: md5
+      md5: 8259539206e15873705dffef72db95a4
+      size: 101082163
+    - path: shared/constants.py
+      hash: md5
+      md5: 87cbff908753749bbff2f5825177236d
+      size: 2926
+    - path: shared/schemas.py
+      hash: md5
+      md5: cc6feb726d1f22710d61e0654b2f2588
+      size: 4029
+    - path: training/src/config.py
+      hash: md5
+      md5: 6309816084d063555c43b89e32fb3869
+      size: 7878
+    - path: training/src/data_lineage.py
+      hash: md5
+      md5: b2dccea1bde68e59ca190cb008e2b7a4
+      size: 2667
+    - path: training/src/evaluate.py
+      hash: md5
+      md5: 3ad81b5da26c8fa80a76e17208db9cd1
+      size: 2395
+    - path: training/src/explainability.py
+      hash: md5
+      md5: 1d75e23a6f8d6eef32c76dc8c7681710
+      size: 2460
+    - path: training/src/model_validation.py
+      hash: md5
+      md5: 942ec23e796ab1720beb86f0ff9d68c0
+      size: 3119
+    - path: training/src/train.py
+      hash: md5
+      md5: b95931f94db2c4e8c245cbb4fc997c88
+      size: 21323
+    outs:
+    - path: reports/train_metrics.json
+      hash: md5
+      md5: 7bcea7c8c7e17253a1546713708c5ec3
+      size: 318
