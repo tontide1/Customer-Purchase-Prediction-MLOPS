@@ -4,6 +4,7 @@ import numpy as np
 from sklearn.metrics import (
     precision_recall_curve,
     auc,
+    average_precision_score,
     f1_score,
     precision_score,
     recall_score,
@@ -25,12 +26,14 @@ def compute_metrics(y_true: np.ndarray, y_pred_proba: np.ndarray) -> tuple[dict,
     """
     precision_vals, recall_vals, _ = precision_recall_curve(y_true, y_pred_proba)
     pr_auc = auc(recall_vals, precision_vals)
+    average_precision = average_precision_score(y_true, y_pred_proba)
 
     threshold = compute_optimal_threshold(y_true, y_pred_proba)
     y_pred = (y_pred_proba >= threshold).astype(int)
 
     metrics = {
         "pr_auc": float(pr_auc),
+        "average_precision": float(average_precision),
         "f1": float(f1_score(y_true, y_pred)),
         "precision": float(precision_score(y_true, y_pred, zero_division=0)),
         "recall": float(recall_score(y_true, y_pred, zero_division=0)),

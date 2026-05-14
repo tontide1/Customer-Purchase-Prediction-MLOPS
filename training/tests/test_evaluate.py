@@ -2,6 +2,7 @@
 
 import numpy as np
 import pytest
+from sklearn.metrics import average_precision_score
 
 from training.src.evaluate import compute_metrics, compute_optimal_threshold
 
@@ -21,6 +22,7 @@ def test_compute_metrics_structure(binary_predictions):
 
     required_keys = [
         "pr_auc",
+        "average_precision",
         "f1",
         "precision",
         "recall",
@@ -63,3 +65,14 @@ def test_confusion_matrix_format(binary_predictions):
 
     assert cm.shape == (2, 2), "Confusion matrix should be 2x2"
     assert cm.sum() == len(y_true), "Confusion matrix sum should equal sample count"
+
+
+def test_compute_metrics_includes_average_precision(binary_predictions):
+    y_true, y_pred = binary_predictions
+    metrics, threshold = compute_metrics(y_true, y_pred)
+
+    assert "average_precision" in metrics
+    assert metrics["average_precision"] == pytest.approx(
+        average_precision_score(y_true, y_pred)
+    )
+    assert metrics["optimal_threshold"] == threshold
