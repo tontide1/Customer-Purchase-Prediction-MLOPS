@@ -17,7 +17,7 @@ NUMERIC_FEATURE_COLUMNS = [
     "price",
 ]
 
-CATEGORICAL_FEATURE_COLUMNS = ["category_id", "category_code", "brand"]
+CATEGORICAL_FEATURE_COLUMNS = ["category_id", "category_code", "brand", "event_type"]
 TARGET_COLUMN = "label"
 MISSING_CATEGORY_TOKEN = "__MISSING__"
 UNKNOWN_CATEGORY_TOKEN = "__UNK__"

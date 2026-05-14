@@ -32,6 +32,7 @@ def _build_gold_like_frame() -> pd.DataFrame:
                 "sports.trainers",
             ],
             "brand": ["brand-a", "brand-b", "brand-c", None],
+            "event_type": ["view", "cart", "purchase", "view"],
             "label": [0, 1, 0, 1],
         }
     )
@@ -63,3 +64,18 @@ def test_transform_with_categorical_contract_handles_null_and_unseen_categories(
     assert str(transformed["brand"].dtype) == "category"
     assert transformed.loc[0, "brand"] == "__UNK__"
     assert transformed.loc[1, "category_code"] == "__MISSING__"
+
+
+def test_prepare_training_frame_includes_event_type():
+    df = _build_gold_like_frame()
+    df["event_type"] = ["view", "cart", "purchase", "view"]
+    frame = prepare_training_frame(df)
+
+    assert frame.categorical_columns == [
+        "category_id",
+        "category_code",
+        "brand",
+        "event_type",
+    ]
+    assert "event_type" in frame.features.columns
+    assert str(frame.features["event_type"].dtype) == "object"
