@@ -86,7 +86,9 @@ class Config:
     # ========================================================================
     # Training Configuration (Sprint 2b)
     # ========================================================================
-    MIN_VALIDATION_PR_AUC_THRESHOLD = float(os.getenv("MIN_VALIDATION_PR_AUC_THRESHOLD", "0.5"))
+    MIN_VALIDATION_PR_AUC_THRESHOLD = float(
+        os.getenv("MIN_VALIDATION_PR_AUC_THRESHOLD", "0.5")
+    )
     TEST_SAMPLE_SIZE = int(os.getenv("TEST_SAMPLE_SIZE", "500"))
     SMOKE_MODE_ENABLED = os.getenv("SMOKE_MODE_ENABLED", "true").lower() == "true"
 

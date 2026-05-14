@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import logging
 from collections.abc import Iterator
+import datetime as dt
 from datetime import timedelta
 from pathlib import Path
 
@@ -39,8 +40,7 @@ def _iter_split_rows(path: str | Path, batch_size: int) -> Iterator[dict]:
         yield row
 
 
-def _session_snapshots(session_df: pl.DataFrame) -> list[dict]:
-    rows = session_df.to_dicts()
+def _session_snapshots(rows: list[dict]) -> list[dict]:
     if not rows:
         return []
 
@@ -61,7 +61,10 @@ def _session_snapshots(session_df: pl.DataFrame) -> list[dict]:
 
     for row in rows:
         current_time = row[constants.FIELD_SOURCE_EVENT_TIME]
-        while purchase_index < len(purchase_times) and purchase_times[purchase_index] <= current_time:
+        while (
+            purchase_index < len(purchase_times)
+            and purchase_times[purchase_index] <= current_time
+        ):
             purchase_index += 1
 
         snapshots.append(
@@ -78,7 +81,9 @@ def _session_snapshots(session_df: pl.DataFrame) -> list[dict]:
                 "total_views": total_views,
                 "total_carts": total_carts,
                 "net_cart_count": total_carts - total_removes,
-                "cart_to_view_ratio": compute_cart_to_view_ratio(total_views, total_carts),
+                "cart_to_view_ratio": compute_cart_to_view_ratio(
+                    total_views, total_carts
+                ),
                 "unique_categories": len(seen_categories),
                 "unique_products": len(seen_products),
                 "session_duration_sec": (current_time - session_start).total_seconds(),
@@ -98,7 +103,9 @@ def _session_snapshots(session_df: pl.DataFrame) -> list[dict]:
 
         seen_products.add(row["product_id"])
         seen_categories.add(
-            normalize_category_value(row.get("category_code"), row[constants.FIELD_CATEGORY_ID])
+            normalize_category_value(
+                row.get("category_code"), row[constants.FIELD_CATEGORY_ID]
+            )
         )
 
     return snapshots
@@ -110,6 +117,8 @@ def build_gold_snapshots(
     output_dir: str | Path,
     batch_size: int = Config.GOLD_BATCH_SIZE,
 ) -> None:
+    training_cutoff = dt.datetime.fromisoformat(Config.TRAINING_SESSION_CUTOFF)
+
     logger.info("Streaming split map from %s", split_map_path)
     split_iter = _iter_split_rows(split_map_path, batch_size=batch_size)
     current_split_row = next(split_iter, None)
@@ -133,11 +142,15 @@ def build_gold_snapshots(
     split_counts: dict[str, int] = {"train": 0, "val": 0, "test": 0}
     current_session_id: str | None = None
     current_session_rows: list[dict] = []
+    current_session_in_scope = False
 
-    def advance_split_row(session_id: str) -> None:
+    def align_split_row(session_id: str) -> None:
         nonlocal current_split_row
 
-        while current_split_row is not None and current_split_row["user_session"] < session_id:
+        while (
+            current_split_row is not None
+            and current_split_row["user_session"] < session_id
+        ):
             current_split_row = next(split_iter, None)
 
         if current_split_row is None:
@@ -154,12 +167,16 @@ def build_gold_snapshots(
             )
 
     def flush_current_session() -> None:
-        nonlocal current_session_id, current_session_rows, total_sessions
+        nonlocal \
+            current_session_id, \
+            current_session_rows, \
+            current_session_in_scope, \
+            total_sessions
 
         if not current_session_rows:
             return
 
-        snapshots_list = _session_snapshots(pl.DataFrame(current_session_rows))
+        snapshots_list = _session_snapshots(current_session_rows)
         split = current_split_row["split"]
 
         if snapshots_list:
@@ -170,27 +187,48 @@ def build_gold_snapshots(
             split_written[split] = True
 
         total_sessions += 1
-        if total_sessions % 100_000 == 0:
+        if total_sessions % 500_000 == 0:
             logger.info("Processed %d sessions...", total_sessions)
         current_session_id = None
         current_session_rows = []
+        current_session_in_scope = False
 
     try:
         for row in _iter_parquet_rows(silver_path, batch_size=batch_size):
             session_id = row["user_session"]
+            session_start_time = row[constants.FIELD_SOURCE_EVENT_TIME]
 
             if current_session_id is None:
-                advance_split_row(session_id)
                 current_session_id = session_id
-            elif session_id != current_session_id:
-                flush_current_session()
-                advance_split_row(session_id)
+                current_session_in_scope = session_start_time < training_cutoff
+                if current_session_in_scope:
+                    align_split_row(session_id)
+                    current_session_rows.append(row)
+                continue
+
+            if session_id != current_session_id:
+                if current_session_in_scope:
+                    flush_current_session()
+                else:
+                    current_session_id = None
+                    current_session_rows = []
+                    current_session_in_scope = False
+
                 current_session_id = session_id
+                current_session_in_scope = session_start_time < training_cutoff
+                if current_session_in_scope:
+                    align_split_row(session_id)
+                    current_session_rows.append(row)
+                continue
 
-            current_session_rows.append(row)
+            if current_session_in_scope:
+                current_session_rows.append(row)
 
-        flush_current_session()
-        if next(split_iter, None) is not None:
+        if current_session_in_scope:
+            flush_current_session()
+
+        extra_split_row = next(split_iter, None)
+        if extra_split_row is not None:
             raise ValueError(
                 "split map contains a session that does not exist in silver"
             )
@@ -213,11 +251,15 @@ def build_gold_snapshots(
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+    )
 
     parser = argparse.ArgumentParser(description="Materialize Sprint 2a gold snapshots")
     parser.add_argument("--input", default=Config.SILVER_DATA_PATH)
-    parser.add_argument("--split-map", default=f"{Config.GOLD_DATA_DIR}/session_split_map.parquet")
+    parser.add_argument(
+        "--split-map", default=f"{Config.GOLD_DATA_DIR}/session_split_map.parquet"
+    )
     parser.add_argument("--output", default=Config.GOLD_DATA_DIR)
     parser.add_argument("--batch-size", type=int, default=Config.GOLD_BATCH_SIZE)
     args = parser.parse_args()

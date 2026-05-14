@@ -32,7 +32,7 @@ def gather_lineage_metadata(
 ) -> Dict[str, Any]:
     """
     Gather lightweight metadata from sprint inputs for traceability.
-    
+
     Args:
         train_path: Path to train.parquet
         val_path: Path to val.parquet
@@ -41,7 +41,7 @@ def gather_lineage_metadata(
         window_start_utc: Data collection window start
         window_end_utc: Data collection window end
         dvc_revision: DVC pipeline revision
-    
+
     Returns:
         Dictionary of lineage metadata
     """
@@ -59,7 +59,9 @@ def gather_lineage_metadata(
         "input_val_path": os.path.abspath(val_path),
         "input_test_path": os.path.abspath(test_path),
         "input_session_split_map_path": os.path.abspath(session_split_map_path),
-        "metadata_timestamp_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "metadata_timestamp_utc": datetime.now(timezone.utc)
+        .isoformat()
+        .replace("+00:00", "Z"),
     }
 
 
@@ -67,6 +69,7 @@ def _count_rows(parquet_path: str) -> int:
     """Count rows in a parquet file without loading all data."""
     try:
         import pyarrow.parquet as pq
+
         parquet_file = pq.ParquetFile(parquet_path)
         return parquet_file.metadata.num_rows
     except Exception:

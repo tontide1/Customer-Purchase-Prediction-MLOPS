@@ -58,9 +58,7 @@ def compute_optimal_threshold(y_true: np.ndarray, y_pred_proba: np.ndarray) -> f
 
     # Compute F1 for each threshold (skip when precision+recall=0 to avoid /0)
     f1_scores = (
-        2
-        * (precision_vals * recall_vals)
-        / (precision_vals + recall_vals + 1e-10)
+        2 * (precision_vals * recall_vals) / (precision_vals + recall_vals + 1e-10)
     )
 
     best_idx = np.argmax(f1_scores)

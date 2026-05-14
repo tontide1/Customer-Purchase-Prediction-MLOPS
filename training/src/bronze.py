@@ -63,7 +63,8 @@ BRONZE_STRING_COLUMNS = [
 ]
 
 RAW_FILE_MONTH_PATTERN = re.compile(
-    r"^(?P<year>\d{4})-(?P<month>[A-Za-z]{3})\.csv(?:\.gz)?$"
+    # r"^(?P<year>\d{4})-(?P<month>[A-Za-z]{3})\.csv(?:\.gz)?$"
+    r"^(?P<year>\d{4})-(?P<month>[A-Za-z]{3})(?:-.*)?\.csv(?:\.gz)?$"
 )
 MONTH_ABBREVIATIONS = {
     "jan": 1,
@@ -557,7 +558,9 @@ def write_bronze_parquet(df: pl.DataFrame, output_path: str) -> None:
         pq.write_table(table, output_path_p, compression="snappy")
     else:
         output_path_p.mkdir(parents=True, exist_ok=True)
-        pq.write_table(table, output_path_p / "part-00000.parquet", compression="snappy")
+        pq.write_table(
+            table, output_path_p / "part-00000.parquet", compression="snappy"
+        )
     logger.info(f"✓ Wrote bronze artifact: {output_path_p}")
 
 

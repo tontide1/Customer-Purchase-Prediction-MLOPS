@@ -84,6 +84,7 @@ def get_silver_sort_columns(df: pl.DataFrame) -> list[str]:
     _ = df.columns
     return list(constants.DEDUP_KEY_FIELDS)
 
+
 def get_silver_output_fields() -> list[str]:
     """Return silver output columns ordered exactly as SILVER_SCHEMA."""
     return [field.name for field in schemas.SILVER_SCHEMA]
@@ -170,7 +171,9 @@ def enforce_silver_dtypes(df: pl.DataFrame) -> pl.DataFrame:
 
     if constants.FIELD_SOURCE_EVENT_TIME in df.columns:
         exprs.append(
-            pl.col(constants.FIELD_SOURCE_EVENT_TIME).cast(pl.Datetime("us"), strict=False),
+            pl.col(constants.FIELD_SOURCE_EVENT_TIME).cast(
+                pl.Datetime("us"), strict=False
+            ),
         )
 
     for column in SILVER_STRING_COLUMNS:
@@ -379,7 +382,9 @@ def write_sorted_silver_runs(
             continue
 
         df = enforce_silver_dtypes(df)
-        df = df.with_columns(pl.col(SILVER_INPUT_ORDER_COLUMN).cast(pl.Int64, strict=True))
+        df = df.with_columns(
+            pl.col(SILVER_INPUT_ORDER_COLUMN).cast(pl.Int64, strict=True)
+        )
         df = sort_silver_working_frame(df.select(get_silver_working_fields()))
 
         run_path = runs_path / f"run-{run_index:05d}.parquet"

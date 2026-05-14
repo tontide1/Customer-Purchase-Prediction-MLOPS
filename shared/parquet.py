@@ -32,4 +32,6 @@ def iter_parquet_batches(path: str | Path, batch_size: int) -> Iterator[pa.Recor
         yield from pq.ParquetFile(source_path).iter_batches(batch_size=batch_size)
         return
 
-    yield from ds.dataset(source_path, format="parquet").to_batches(batch_size=batch_size)
+    yield from ds.dataset(source_path, format="parquet").to_batches(
+        batch_size=batch_size
+    )

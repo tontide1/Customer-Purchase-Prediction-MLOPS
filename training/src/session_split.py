@@ -45,32 +45,42 @@ def build_session_split_map(
     )
 
     if sessions.is_empty():
-        raise ValueError("silver input is empty or no sessions remain after applying cutoff")
+        raise ValueError(
+            "silver input is empty or no sessions remain after applying cutoff"
+        )
 
     n_sessions = sessions.height
     train_end = int(n_sessions * 0.8)
     val_end = int(n_sessions * 0.9)
 
-    sessions = sessions.with_row_index("_row").with_columns(
-        pl.when(pl.col("_row") < train_end)
-        .then(pl.lit("train"))
-        .when(pl.col("_row") < val_end)
-        .then(pl.lit("val"))
-        .otherwise(pl.lit("test"))
-        .alias("split")
-    ).drop("_row")
+    sessions = (
+        sessions.with_row_index("_row")
+        .with_columns(
+            pl.when(pl.col("_row") < train_end)
+            .then(pl.lit("train"))
+            .when(pl.col("_row") < val_end)
+            .then(pl.lit("val"))
+            .otherwise(pl.lit("test"))
+            .alias("split")
+        )
+        .drop("_row")
+    )
 
     output_path_p = Path(output_path)
     output_path_p.parent.mkdir(parents=True, exist_ok=True)
-    sessions.select(["user_session", "session_start_time", "session_end_time", "split"]).sort(
-        "user_session"
-    ).write_parquet(output_path_p)
+    sessions.select(
+        ["user_session", "session_start_time", "session_end_time", "split"]
+    ).sort("user_session").write_parquet(output_path_p)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Build a deterministic session split map")
+    parser = argparse.ArgumentParser(
+        description="Build a deterministic session split map"
+    )
     parser.add_argument("--input", default=Config.SILVER_DATA_PATH)
-    parser.add_argument("--output", default=f"{Config.GOLD_DATA_DIR}/session_split_map.parquet")
+    parser.add_argument(
+        "--output", default=f"{Config.GOLD_DATA_DIR}/session_split_map.parquet"
+    )
     parser.add_argument("--cutoff-iso", default=Config.TRAINING_SESSION_CUTOFF)
     args = parser.parse_args()
 
