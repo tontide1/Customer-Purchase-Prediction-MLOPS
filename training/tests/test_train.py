@@ -284,11 +284,15 @@ def test_smoke_and_full_runs_pass_same_device_policy(gold_data, monkeypatch):
 
     def fake_train(*args, **kwargs):
         recorded_devices.append(kwargs["device"])
-        return _FakeModel(), {"pr_auc": 0.8, "confusion_matrix": np.array([[1, 0], [0, 1]])}
+        return _FakeModel(), {"pr_auc": 0.8, "average_precision": 0.8, "confusion_matrix": np.array([[1, 0], [0, 1]])}
 
     monkeypatch.setattr("training.src.train.train_catboost_candidate", fake_train)
     monkeypatch.setattr("training.src.train.train_lightgbm_candidate", fake_train)
     monkeypatch.setattr("training.src.train.train_xgboost_candidate", fake_train)
+    monkeypatch.setattr(
+        "training.src.train.evaluate_winner_on_test",
+        lambda *args, **kwargs: {"pr_auc": 0.8, "average_precision": 0.8, "confusion_matrix": np.array([[1, 0], [0, 1]])},
+    )
 
     monkeypatch.setattr(
         sys,
@@ -326,14 +330,18 @@ def test_auto_device_falls_back_to_cpu_when_gpu_fails(gold_data, monkeypatch):
         calls["cat"] += 1
         if calls["cat"] == 1:
             raise RuntimeError("GPU unavailable")
-        return _FakeModel(), {"pr_auc": 0.8, "confusion_matrix": np.array([[1, 0], [0, 1]])}
+        return _FakeModel(), {"pr_auc": 0.8, "average_precision": 0.8, "confusion_matrix": np.array([[1, 0], [0, 1]])}
 
     def ok_train(*args, **kwargs):
-        return _FakeModel(), {"pr_auc": 0.8, "confusion_matrix": np.array([[1, 0], [0, 1]])}
+        return _FakeModel(), {"pr_auc": 0.8, "average_precision": 0.8, "confusion_matrix": np.array([[1, 0], [0, 1]])}
 
     monkeypatch.setattr("training.src.train.train_catboost_candidate", cat_train)
     monkeypatch.setattr("training.src.train.train_lightgbm_candidate", ok_train)
     monkeypatch.setattr("training.src.train.train_xgboost_candidate", ok_train)
+    monkeypatch.setattr(
+        "training.src.train.evaluate_winner_on_test",
+        lambda *args, **kwargs: {"pr_auc": 0.8, "average_precision": 0.8, "confusion_matrix": np.array([[1, 0], [0, 1]])},
+    )
 
     monkeypatch.setattr(
         sys,
@@ -358,3 +366,43 @@ def test_auto_device_falls_back_to_cpu_when_gpu_fails(gold_data, monkeypatch):
 
     assert main() == 0
     assert calls["cat"] == 2
+
+
+def test_main_logs_test_metrics_for_selected_winner(gold_data, monkeypatch):
+    fake_mlflow = _FakeMlflow()
+    monkeypatch.setattr("training.src.train.mlflow", fake_mlflow)
+    monkeypatch.setattr("training.src.train.OPTUNA_SMOKE_TRIALS", 1)
+
+    seen_test_eval = {"called": False}
+
+    def fake_train(*args, **kwargs):
+        return _FakeModel(), {"pr_auc": 0.9, "average_precision": 0.9, "confusion_matrix": np.array([[1, 0], [0, 1]])}
+
+    def fake_eval_on_test(*args, **kwargs):
+        seen_test_eval["called"] = True
+        return {"pr_auc": 0.8, "average_precision": 0.8, "confusion_matrix": np.array([[1, 0], [0, 1]])}
+
+    monkeypatch.setattr("training.src.train.train_catboost_candidate", fake_train)
+    monkeypatch.setattr("training.src.train.train_lightgbm_candidate", fake_train)
+    monkeypatch.setattr("training.src.train.train_xgboost_candidate", fake_train)
+    monkeypatch.setattr("training.src.train.evaluate_winner_on_test", fake_eval_on_test)
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "training.src.train",
+            "--train",
+            gold_data["train_path"],
+            "--val",
+            gold_data["val_path"],
+            "--test",
+            gold_data["test_path"],
+            "--session-split-map",
+            gold_data["split_map_path"],
+            "--smoke-mode",
+        ],
+    )
+
+    assert main() == 0
+    assert seen_test_eval["called"] is True

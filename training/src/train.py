@@ -40,6 +40,8 @@ MLFLOW_EXPERIMENT_NAME = Config.MLFLOW_EXPERIMENT_NAME
 OPTUNA_SMOKE_TRIALS = Config.OPTUNA_SMOKE_TRIALS
 OPTUNA_TARGET_TRIALS = Config.OPTUNA_TARGET_TRIALS
 MIN_VALIDATION_PR_AUC_THRESHOLD = Config.MIN_VALIDATION_PR_AUC_THRESHOLD
+TRAIN_DEVICE = Config.TRAIN_DEVICE
+GPU_DEVICE_ID = Config.GPU_DEVICE_ID
 
 
 @dataclass(frozen=True)
@@ -50,6 +52,8 @@ class PreparedTrainingData:
     train_target: pd.Series
     val_features: pd.DataFrame
     val_target: pd.Series
+    test_features: pd.DataFrame
+    test_target: pd.Series
     categorical_columns: list[str]
     numeric_columns: list[str]
     categorical_artifacts: CategoricalEncodingArtifacts
@@ -65,6 +69,17 @@ def _log_metrics(metrics: dict, confusion_matrix_name: str) -> None:
     mlflow.log_text(
         json.dumps(metrics["confusion_matrix"].tolist()),
         confusion_matrix_name,
+    )
+
+
+def _resolve_training_device(
+    device: str | None, gpu_device_id: str | None
+) -> tuple[str, str]:
+    """Resolve runtime device settings to concrete values."""
+
+    return (
+        TRAIN_DEVICE if device is None else device,
+        GPU_DEVICE_ID if gpu_device_id is None else str(gpu_device_id),
     )
 
 
@@ -86,11 +101,12 @@ def build_training_data(
     val_path: str,
     test_path: str,
 ) -> PreparedTrainingData:
-    """Prepare categorical-aware train/validation frames from gold parquet files."""
-    train_df, val_df, _ = load_gold_data(train_path, val_path, test_path)
+    """Prepare categorical-aware train/validation/test frames from gold parquet files."""
+    train_df, val_df, test_df = load_gold_data(train_path, val_path, test_path)
 
     train_frame = prepare_training_frame(train_df)
     val_frame = prepare_training_frame(val_df)
+    test_frame = prepare_training_frame(test_df)
 
     categorical_artifacts = fit_categorical_encoders(train_frame.features)
     train_features = transform_with_categorical_contract(
@@ -99,20 +115,25 @@ def build_training_data(
     val_features = transform_with_categorical_contract(
         val_frame.features, categorical_artifacts
     )
+    test_features = transform_with_categorical_contract(
+        test_frame.features, categorical_artifacts
+    )
 
     return PreparedTrainingData(
         train_features=train_features,
         train_target=train_frame.target,
         val_features=val_features,
         val_target=val_frame.target,
+        test_features=test_features,
+        test_target=test_frame.target,
         categorical_columns=list(CATEGORICAL_FEATURE_COLUMNS),
         numeric_columns=list(NUMERIC_FEATURE_COLUMNS),
         categorical_artifacts=categorical_artifacts,
     )
 
 
-def _catboost_params(trial: optuna.Trial) -> dict:
-    return {
+def _catboost_params(trial: optuna.Trial, device: str, gpu_device_id: str) -> dict:
+    params = {
         "iterations": trial.suggest_int("iterations", 100, 300),
         "depth": trial.suggest_int("depth", 4, 10),
         "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3),
@@ -123,9 +144,15 @@ def _catboost_params(trial: optuna.Trial) -> dict:
         "allow_writing_files": False,
         "verbose": False,
     }
+    if device in {"auto", "gpu"}:
+        params["task_type"] = "GPU"
+        params["devices"] = gpu_device_id
+    return params
 
 
-def _lightgbm_params(trial: optuna.Trial) -> dict:
+def _lightgbm_params(
+    trial: optuna.Trial, device: str, gpu_device_id: str
+) -> dict:
     use_unbalance = trial.suggest_categorical("is_unbalance", [True, False])
     params = {
         "max_depth": trial.suggest_int("max_depth", 3, 10),
@@ -139,11 +166,16 @@ def _lightgbm_params(trial: optuna.Trial) -> dict:
         params["is_unbalance"] = True
     else:
         params["scale_pos_weight"] = trial.suggest_float("scale_pos_weight", 0.5, 5.0)
+    if device in {"auto", "gpu"}:
+        params["device_type"] = "gpu"
+        params["gpu_device_id"] = int(gpu_device_id)
+    else:
+        params["device_type"] = "cpu"
     return params
 
 
-def _xgboost_params(trial: optuna.Trial) -> dict:
-    return {
+def _xgboost_params(trial: optuna.Trial, device: str, gpu_device_id: str) -> dict:
+    params = {
         "max_depth": trial.suggest_int("max_depth", 3, 10),
         "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3),
         "n_estimators": trial.suggest_int("n_estimators", 50, 200),
@@ -154,6 +186,54 @@ def _xgboost_params(trial: optuna.Trial) -> dict:
         "eval_metric": "aucpr",
         "n_jobs": -1,
     }
+    if device in {"auto", "gpu"}:
+        params["device"] = f"cuda:{gpu_device_id}"
+    else:
+        params["device"] = "cpu"
+    return params
+
+
+def _train_candidate_with_device_policy(
+    candidate_name: str,
+    train_fn,
+    *,
+    device: str,
+    gpu_device_id: str,
+    train_features: pd.DataFrame,
+    train_target: pd.Series,
+    val_features: pd.DataFrame,
+    val_target: pd.Series,
+    n_trials: int,
+    categorical_columns: list[str] | None = None,
+):
+    """Run a candidate with the selected device policy."""
+
+    def run(resolved_device: str):
+        call_kwargs = {
+            "train_features": train_features,
+            "y_train": train_target,
+            "val_features": val_features,
+            "y_val": val_target,
+            "n_trials": n_trials,
+            "device": resolved_device,
+            "gpu_device_id": gpu_device_id,
+        }
+        if categorical_columns is not None:
+            call_kwargs["categorical_columns"] = categorical_columns
+        return train_fn(**call_kwargs)
+
+    if device != "auto":
+        return run(device)
+
+    try:
+        return run("gpu")
+    except Exception as exc:
+        logger.warning(
+            "%s GPU training failed, retrying on CPU: %s",
+            candidate_name,
+            exc,
+        )
+        return run("cpu")
 
 
 def train_catboost_candidate(
@@ -163,14 +243,17 @@ def train_catboost_candidate(
     y_val: pd.Series,
     categorical_columns: list[str],
     n_trials: int = OPTUNA_TARGET_TRIALS,
+    device: str | None = None,
+    gpu_device_id: str | None = None,
 ) -> tuple[CatBoostClassifier, Dict[str, float]]:
     """Train CatBoost with Optuna hyperparameter search."""
 
+    device, gpu_device_id = _resolve_training_device(device, gpu_device_id)
     train_pool = Pool(train_features, label=y_train, cat_features=categorical_columns)
     val_pool = Pool(val_features, label=y_val, cat_features=categorical_columns)
 
     def objective(trial: optuna.Trial):
-        model = CatBoostClassifier(**_catboost_params(trial))
+        model = CatBoostClassifier(**_catboost_params(trial, device, gpu_device_id))
         model.fit(train_pool, eval_set=val_pool, verbose=False)
         y_pred_proba = model.predict_proba(val_pool)[:, 1]
         metrics, _ = compute_metrics(y_val, y_pred_proba)
@@ -180,7 +263,9 @@ def train_catboost_candidate(
     study = optuna.create_study(sampler=sampler, direction="maximize")
     study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
 
-    best_params = _catboost_params(optuna.trial.FixedTrial(study.best_params))
+    best_params = _catboost_params(
+        optuna.trial.FixedTrial(study.best_params), device, gpu_device_id
+    )
     model = CatBoostClassifier(**best_params)
     model.fit(train_pool, eval_set=val_pool, verbose=False)
 
@@ -196,11 +281,15 @@ def train_lightgbm_candidate(
     y_val: pd.Series,
     categorical_columns: list[str],
     n_trials: int = OPTUNA_TARGET_TRIALS,
+    device: str | None = None,
+    gpu_device_id: str | None = None,
 ) -> tuple[LGBMClassifier, Dict[str, float]]:
     """Train LightGBM with Optuna hyperparameter search."""
 
+    device, gpu_device_id = _resolve_training_device(device, gpu_device_id)
+
     def objective(trial: optuna.Trial):
-        params = _lightgbm_params(trial)
+        params = _lightgbm_params(trial, device, gpu_device_id)
         model = LGBMClassifier(**params)
         model.fit(
             train_features,
@@ -215,7 +304,9 @@ def train_lightgbm_candidate(
     study = optuna.create_study(sampler=sampler, direction="maximize")
     study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
 
-    best_params = _lightgbm_params(optuna.trial.FixedTrial(study.best_params))
+    best_params = _lightgbm_params(
+        optuna.trial.FixedTrial(study.best_params), device, gpu_device_id
+    )
     model = LGBMClassifier(**best_params)
     model.fit(
         train_features,
@@ -234,11 +325,15 @@ def train_xgboost_candidate(
     val_features: pd.DataFrame,
     y_val: pd.Series,
     n_trials: int = OPTUNA_TARGET_TRIALS,
+    device: str | None = None,
+    gpu_device_id: str | None = None,
 ) -> tuple[XGBClassifier, Dict[str, float]]:
     """Train XGBoost with Optuna hyperparameter search."""
 
+    device, gpu_device_id = _resolve_training_device(device, gpu_device_id)
+
     def objective(trial: optuna.Trial):
-        params = _xgboost_params(trial)
+        params = _xgboost_params(trial, device, gpu_device_id)
         model = XGBClassifier(**params)
         model.fit(train_features, y_train, verbose=False)
         y_pred_proba = model.predict_proba(val_features)[:, 1]
@@ -249,7 +344,9 @@ def train_xgboost_candidate(
     study = optuna.create_study(sampler=sampler, direction="maximize")
     study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
 
-    best_params = _xgboost_params(optuna.trial.FixedTrial(study.best_params))
+    best_params = _xgboost_params(
+        optuna.trial.FixedTrial(study.best_params), device, gpu_device_id
+    )
     model = XGBClassifier(**best_params)
     model.fit(train_features, y_train, verbose=False)
 
@@ -264,6 +361,13 @@ def find_best_model_by_validation_pr_auc(results: Dict[str, Dict]) -> tuple[str,
     return best_name, results[best_name]
 
 
+def evaluate_winner_on_test(model, test_features: pd.DataFrame, test_target: pd.Series) -> dict:
+    """Evaluate the selected winner model on the held-out test set."""
+    y_pred_proba = model.predict_proba(test_features)[:, 1]
+    metrics, _ = compute_metrics(test_target, y_pred_proba)
+    return metrics
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--train", required=True, help="Path to train.parquet")
@@ -275,6 +379,17 @@ def main() -> int:
         help="Path to session_split_map.parquet",
     )
     parser.add_argument("--smoke-mode", action="store_true", help="Use smoke budgets")
+    parser.add_argument(
+        "--device",
+        default=Config.TRAIN_DEVICE,
+        choices=["auto", "cpu", "gpu"],
+        help="Training device policy",
+    )
+    parser.add_argument(
+        "--gpu-device-id",
+        default=Config.GPU_DEVICE_ID,
+        help="GPU device ordinal to use when GPU is enabled",
+    )
 
     args = parser.parse_args()
 
@@ -294,18 +409,23 @@ def main() -> int:
     logger.info(
         "Training 3 candidates (smoke=%s, trials=%d)...", args.smoke_mode, n_trials
     )
+    logger.info("Device policy: %s (gpu_device_id=%s)", args.device, args.gpu_device_id)
 
     results = {}
 
     with mlflow.start_run(run_name="catboost"):
         mlflow.log_dict(lineage_metadata, "lineage/metadata.json")
-        catboost_model, catboost_metrics = train_catboost_candidate(
-            data.train_features,
-            data.train_target,
-            data.val_features,
-            data.val_target,
-            data.categorical_columns,
-            n_trials,
+        catboost_model, catboost_metrics = _train_candidate_with_device_policy(
+            "catboost",
+            train_catboost_candidate,
+            device=args.device,
+            gpu_device_id=args.gpu_device_id,
+            train_features=data.train_features,
+            train_target=data.train_target,
+            val_features=data.val_features,
+            val_target=data.val_target,
+            n_trials=n_trials,
+            categorical_columns=data.categorical_columns,
         )
         _log_metrics(catboost_metrics, "catboost_confusion_matrix.json")
         mlflow.sklearn.log_model(catboost_model, "model")
@@ -316,13 +436,17 @@ def main() -> int:
 
     with mlflow.start_run(run_name="lightgbm"):
         mlflow.log_dict(lineage_metadata, "lineage/metadata.json")
-        lgb_model, lgb_metrics = train_lightgbm_candidate(
-            data.train_features,
-            data.train_target,
-            data.val_features,
-            data.val_target,
-            data.categorical_columns,
-            n_trials,
+        lgb_model, lgb_metrics = _train_candidate_with_device_policy(
+            "lightgbm",
+            train_lightgbm_candidate,
+            device=args.device,
+            gpu_device_id=args.gpu_device_id,
+            train_features=data.train_features,
+            train_target=data.train_target,
+            val_features=data.val_features,
+            val_target=data.val_target,
+            n_trials=n_trials,
+            categorical_columns=data.categorical_columns,
         )
         _log_metrics(lgb_metrics, "lightgbm_confusion_matrix.json")
         mlflow.sklearn.log_model(lgb_model, "model")
@@ -330,12 +454,16 @@ def main() -> int:
 
     with mlflow.start_run(run_name="xgboost"):
         mlflow.log_dict(lineage_metadata, "lineage/metadata.json")
-        xgb_model, xgb_metrics = train_xgboost_candidate(
-            data.train_features,
-            data.train_target,
-            data.val_features,
-            data.val_target,
-            n_trials,
+        xgb_model, xgb_metrics = _train_candidate_with_device_policy(
+            "xgboost",
+            train_xgboost_candidate,
+            device=args.device,
+            gpu_device_id=args.gpu_device_id,
+            train_features=data.train_features,
+            train_target=data.train_target,
+            val_features=data.val_features,
+            val_target=data.val_target,
+            n_trials=n_trials,
         )
         _log_metrics(xgb_metrics, "xgboost_confusion_matrix.json")
         mlflow.sklearn.log_model(xgb_model, "model")
@@ -346,6 +474,19 @@ def main() -> int:
         "Winner: %s (PR-AUC: %.4f)",
         winner_name,
         winner_data["metrics"]["pr_auc"],
+    )
+
+    test_metrics = evaluate_winner_on_test(
+        winner_data["model"],
+        data.test_features,
+        data.test_target,
+    )
+    mlflow.log_metrics({f"test_{k}": v for k, v in test_metrics.items() if isinstance(v, (int, float, np.floating))})
+    logger.info(
+        "Test results for %s: PR-AUC=%.4f, average_precision=%.4f",
+        winner_name,
+        test_metrics["pr_auc"],
+        test_metrics["average_precision"],
     )
 
     gate_pass = validate_model_gate(
