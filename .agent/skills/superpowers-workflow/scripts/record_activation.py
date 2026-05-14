@@ -8,7 +8,11 @@ from pathlib import Path
 def find_repo_root(start: Path) -> Path:
     # Walk upwards until we find a marker that suggests repo root
     for p in [start, *start.parents]:
-        if (p / ".agent").exists() or (p / ".git").exists() or (p / "pyproject.toml").exists():
+        if (
+            (p / ".agent").exists()
+            or (p / ".git").exists()
+            or (p / "pyproject.toml").exists()
+        ):
             return p
     return start
 
@@ -25,7 +29,9 @@ def main() -> int:
 
     ts = datetime.now(timezone.utc).isoformat()
     line = f"{ts}\tskill={args.skill}\trun_id={args.run_id}\n"
-    log_path.write_text((log_path.read_text() if log_path.exists() else "") + line, encoding="utf-8")
+    log_path.write_text(
+        (log_path.read_text() if log_path.exists() else "") + line, encoding="utf-8"
+    )
 
     return 0
 
