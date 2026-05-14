@@ -91,6 +91,8 @@ class Config:
     )
     TEST_SAMPLE_SIZE = int(os.getenv("TEST_SAMPLE_SIZE", "500"))
     SMOKE_MODE_ENABLED = os.getenv("SMOKE_MODE_ENABLED", "true").lower() == "true"
+    TRAIN_DEVICE = os.getenv("TRAIN_DEVICE", "gpu")
+    GPU_DEVICE_ID = os.getenv("GPU_DEVICE_ID", "0")
 
     @classmethod
     def validate(cls) -> bool:
@@ -148,6 +150,8 @@ class Config:
             "min_validation_pr_auc_threshold": cls.MIN_VALIDATION_PR_AUC_THRESHOLD,
             "test_sample_size": cls.TEST_SAMPLE_SIZE,
             "smoke_mode_enabled": cls.SMOKE_MODE_ENABLED,
+            "train_device": cls.TRAIN_DEVICE,
+            "gpu_device_id": cls.GPU_DEVICE_ID,
         }
 
 
