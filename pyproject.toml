@@ -9,6 +9,8 @@ description = "Week 1 data foundation pipeline for the IUH MLOps final project."
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
 dependencies = [
+    "pandas>=2.2.0",
+    "quixstreams>=3.25.0",
     "pyarrow==24.0.0",
     "polars==1.40.1",
     "python-dotenv==1.2.2",
@@ -35,10 +37,10 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["shared*", "training*"]
+include = ["shared*", "training*", "services*"]
 
 [tool.pytest.ini_options]
-testpaths = ["training/tests"]
+testpaths = ["training/tests", "services/tests"]
 
 [tool.ruff]
 target-version = "py311"
