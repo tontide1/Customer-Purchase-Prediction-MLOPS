@@ -27,6 +27,11 @@
   - `dvc.yaml` has `train` stage depending on gold outputs
   - Gold streaming refactor: uses `pq.ParquetWriter` to avoid OOM on 42M rows
   - Gold files are file-based (`data/bronze/events.parquet`, `data/gold/*.parquet`) not directories
+- **Week 3 stream-processing simulator** is implemented in branch `week3-01` / PR #8:
+  - `shared/event_id.py` adds the canonical replay event-id helper
+  - `services/simulator/replay.py` handles bounded replay normalization and Quix-safe publish serialization
+  - `services/simulator/app.py`, `services/simulator/Dockerfile`, and `services/simulator/requirements.txt` provide the replay CLI/container entrypoint
+  - `services/tests/` includes coverage for replay ordering, publish keys, and serialized topic handling
 - Executable data & training foundation exists in:
   - `training/src/config.py`, `training/src/bronze.py`, `training/src/silver.py`
   - `training/src/features.py`, `training/src/session_split.py`, `training/src/gold.py`
