@@ -78,7 +78,7 @@ def _nullable_float(value: Any) -> float | None:
 
 def normalize_raw_row(row: dict[str, Any], replay_time: str | None = None) -> dict[str, Any]:
     for field in RAW_REQUIRED_FIELDS:
-        if field not in row or _is_missing(row[field]) or str(row[field]) == "":
+        if field not in row or _is_missing(row[field]):
             raise ValueError(f"Missing required raw field: {field}")
 
     event_type = _as_text(row["event_type"])
