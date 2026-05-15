@@ -35,7 +35,11 @@ RAW_COLUMNS = [
 
 
 def _is_missing(value: Any) -> bool:
-    return value is None or (isinstance(value, str) and value == "") or bool(pd.isna(value))
+    return (
+        value is None
+        or (isinstance(value, str) and value == "")
+        or bool(pd.isna(value))
+    )
 
 
 def _as_text(value: Any) -> str:
@@ -111,11 +115,16 @@ def publish_events(
     events: Iterable[dict[str, Any]],
     *,
     producer,
-    topic: str,
+    topic: str | Any,
 ) -> int:
     count = 0
     for event in events:
-        producer.produce(topic=topic, key=event["user_session"], value=event)
+        key = event["user_session"]
+        if hasattr(topic, "serialize"):
+            message = topic.serialize(key=key, value=event)
+            producer.produce(topic=topic.name, key=message.key, value=message.value)
+        else:
+            producer.produce(topic=topic, key=key, value=event)
         count += 1
     producer.flush()
     return count

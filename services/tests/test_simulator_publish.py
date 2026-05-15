@@ -10,12 +10,30 @@ from services.simulator.replay import iter_replay_events, publish_events
 class FakeProducer:
     def __init__(self):
         self.messages = []
+        self.flush_count = 0
 
     def produce(self, *, topic, key, value):
         self.messages.append({"topic": topic, "key": key, "value": value})
 
     def flush(self):
+        self.flush_count += 1
         self.flushed = True
+
+
+class FakeSerializedMessage:
+    def __init__(self, *, key, value):
+        self.key = key
+        self.value = value
+
+
+class FakeTopic:
+    name = "raw_events"
+
+    def serialize(self, *, key, value):
+        return FakeSerializedMessage(
+            key=f"serialized-key:{key}",
+            value={"serialized": value},
+        )
 
 
 def test_iter_replay_events_is_bounded_and_sorted_within_session(tmp_path):
@@ -81,4 +99,38 @@ def test_publish_events_uses_user_session_as_key():
     assert producer.messages == [
         {"topic": "raw_events", "key": "session-1", "value": event}
     ]
+    assert producer.flush_count == 1
     assert producer.flushed is True
+
+
+def test_publish_events_serializes_with_quix_topic_and_flushes_once():
+    producer = FakeProducer()
+    events = [
+        {
+            "event_id": "event-1",
+            "user_session": "session-1",
+            "source_event_time": "2019-11-01T00:00:00",
+        },
+        {
+            "event_id": "event-2",
+            "user_session": "session-2",
+            "source_event_time": "2019-11-01T00:01:00",
+        },
+    ]
+
+    count = publish_events(events, producer=producer, topic=FakeTopic())
+
+    assert count == 2
+    assert producer.messages == [
+        {
+            "topic": "raw_events",
+            "key": "serialized-key:session-1",
+            "value": {"serialized": events[0]},
+        },
+        {
+            "topic": "raw_events",
+            "key": "serialized-key:session-2",
+            "value": {"serialized": events[1]},
+        },
+    ]
+    assert producer.flush_count == 1
