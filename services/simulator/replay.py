@@ -47,6 +47,17 @@ def _as_text(value: Any) -> str:
 
 
 def _normalize_timestamp(value: Any) -> str:
+    try:
+        timestamp = pd.Timestamp(value)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f"Invalid event_time value: {value!r}") from exc
+
+    if timestamp.tzinfo is not None:
+        timestamp = timestamp.tz_convert("UTC").tz_localize(None)
+    return timestamp.isoformat()
+
+
+def _normalize_timestamp(value: Any) -> str:
     timestamp = pd.Timestamp(value)
     if timestamp.tzinfo is not None:
         timestamp = timestamp.tz_convert("UTC").tz_localize(None)
