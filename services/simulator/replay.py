@@ -35,7 +35,7 @@ RAW_COLUMNS = [
 
 
 def _is_missing(value: Any) -> bool:
-    return value is None or bool(pd.isna(value))
+    return value is None or (isinstance(value, str) and value == "") or bool(pd.isna(value))
 
 
 def _as_text(value: Any) -> str:

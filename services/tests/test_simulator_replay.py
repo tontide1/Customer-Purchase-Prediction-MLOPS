@@ -76,3 +76,23 @@ def test_normalize_raw_row_keeps_nullable_fields_as_none():
     assert event["category_code"] is None
     assert event["brand"] is None
     assert event["price"] is None
+
+
+def test_normalize_raw_row_converts_blank_nullable_fields_to_none():
+    row = {
+        "event_time": "2019-11-01 00:00:00 UTC",
+        "event_type": "cart",
+        "product_id": "100",
+        "category_id": "200",
+        "category_code": "",
+        "brand": "",
+        "price": "",
+        "user_id": "42",
+        "user_session": "session-1",
+    }
+
+    event = normalize_raw_row(row, replay_time="2026-05-15T09:00:00")
+
+    assert event["category_code"] is None
+    assert event["brand"] is None
+    assert event["price"] is None
