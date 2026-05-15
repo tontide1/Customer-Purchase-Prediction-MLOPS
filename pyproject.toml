@@ -7,10 +7,10 @@ name = "iuh-final-mlops"
 version = "0.1.0"
 description = "Week 1 data foundation pipeline for the IUH MLOps final project."
 readme = "README.md"
-requires-python = ">=3.11,<3.13"
+requires-python = ">=3.11,<3.12"
 dependencies = [
     "pandas>=2.2.0",
-    "quixstreams>=3.25.0",
+    "quixstreams>=3.23.0",
     "pyarrow==24.0.0",
     "polars==1.40.1",
     "python-dotenv==1.2.2",
