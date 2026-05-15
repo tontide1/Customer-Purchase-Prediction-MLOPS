@@ -6,6 +6,8 @@
 
 **Architecture:** This plan owns the first publish-side increment of the Week 3 slice. It creates a shared event-id helper, normalizes raw November CSV rows into the online event contract, and adds a simulator CLI/container that publishes events with `user_session` as the Kafka key.
 
+The simulator deliberately sorts bounded replay events by `user_session` and raw `event_time` before publishing. Late-event integration tests must inject a late event after accepted state exists; they must not rely on an unsorted CSV row being published out of order.
+
 **Tech Stack:** Python 3.11, pandas, Quix Streams producer APIs, pytest, Docker.
 
 ---
@@ -544,4 +546,3 @@ Expected: all tests pass.
 git add services/simulator/replay.py services/simulator/app.py services/simulator/requirements.txt services/simulator/Dockerfile services/tests/test_simulator_publish.py
 git commit -m "feat: publish bounded replay events"
 ```
-

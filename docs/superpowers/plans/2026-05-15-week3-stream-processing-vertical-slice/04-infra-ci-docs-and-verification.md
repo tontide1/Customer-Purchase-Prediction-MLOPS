@@ -47,11 +47,15 @@ def test_compose_declares_week3_services_and_topics():
     ):
         assert name in services
 
-    init_command = services["redpanda-init"]["command"]
-    assert "raw_events" in init_command
-    assert "late_events" in init_command
-    assert "--partitions 3" in init_command
-    assert "--replicas 1" in init_command
+    assert "infra/redpanda/init-topics.sh" in services["redpanda-init"]["command"]
+
+    init_script = Path("infra/redpanda/init-topics.sh").read_text(encoding="utf-8")
+    assert "raw_events" in init_script
+    assert "late_events" in init_script
+    assert "--partitions 3" in init_script
+    assert "--replicas 1" in init_script
+    assert "rpk cluster info" in init_script
+    assert "rpk topic list" in init_script
 
 
 def test_env_example_contains_week3_runtime_settings():
@@ -92,8 +96,24 @@ Create `infra/redpanda/init-topics.sh`:
 #!/bin/sh
 set -eu
 
-rpk topic create raw_events --brokers redpanda:9092 --partitions 3 --replicas 1 || true
-rpk topic create late_events --brokers redpanda:9092 --partitions 3 --replicas 1 || true
+BROKERS="${KAFKA_BROKER:-redpanda:9092}"
+
+for attempt in $(seq 1 30); do
+  if rpk cluster info --brokers "$BROKERS" >/dev/null 2>&1; then
+    break
+  fi
+  if [ "$attempt" -eq 30 ]; then
+    echo "Redpanda broker did not become ready" >&2
+    exit 1
+  fi
+  sleep 2
+done
+
+rpk topic create raw_events --brokers "$BROKERS" --partitions 3 --replicas 1 || true
+rpk topic create late_events --brokers "$BROKERS" --partitions 3 --replicas 1 || true
+
+rpk topic list --brokers "$BROKERS" | grep -q '^raw_events'
+rpk topic list --brokers "$BROKERS" | grep -q '^late_events'
 ```
 
 - [ ] **Step 5: Extend compose**
@@ -131,9 +151,11 @@ In `docker-compose.yml`, keep existing `minio`, `minio-init`, and `mlflow` uncha
     container_name: redpanda-init
     depends_on:
       - redpanda
-    command: >
-      sh -c "rpk topic create raw_events --brokers redpanda:9092 --partitions 3 --replicas 1 || true &&
-             rpk topic create late_events --brokers redpanda:9092 --partitions 3 --replicas 1 || true"
+    command: sh /infra/redpanda/init-topics.sh
+    environment:
+      KAFKA_BROKER: redpanda:9092
+    volumes:
+      - ./infra/redpanda/init-topics.sh:/infra/redpanda/init-topics.sh:ro
     restart: "no"
     networks:
       - mlops_net
@@ -277,7 +299,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from scripts.week3_compose_smoke import build_ci_fixture
+import pytest
+
+from scripts.week3_compose_smoke import build_ci_fixture, require_real_serving_bundle_uri
 
 
 def test_build_ci_fixture_contains_required_event_shapes(tmp_path):
@@ -293,6 +317,16 @@ def test_build_ci_fixture_contains_required_event_shapes(tmp_path):
     assert set(frame["user_session"]) == {"ci-session-1", "ci-session-2"}
     assert {"view", "cart", "remove_from_cart", "purchase"}.issubset(set(frame["event_type"]))
     assert frame["category_code"].isna().any() or frame["brand"].isna().any()
+
+
+def test_require_real_serving_bundle_uri_rejects_missing_or_placeholder(monkeypatch):
+    monkeypatch.delenv("MLFLOW_SERVING_BUNDLE_URI", raising=False)
+    with pytest.raises(RuntimeError, match="MLFLOW_SERVING_BUNDLE_URI"):
+        require_real_serving_bundle_uri()
+
+    monkeypatch.setenv("MLFLOW_SERVING_BUNDLE_URI", "runs:/replace-with-week3-smoke-run")
+    with pytest.raises(RuntimeError, match="MLFLOW_SERVING_BUNDLE_URI"):
+        require_real_serving_bundle_uri()
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -311,6 +345,8 @@ Create `scripts/week3_compose_smoke.py`:
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -380,8 +416,79 @@ def build_ci_fixture(path: Path) -> None:
     pd.DataFrame(rows).to_csv(path, index=False, compression="gzip")
 
 
-def run_command(command: list[str]) -> None:
-    subprocess.run(command, check=True)
+PLACEHOLDER_BUNDLE_URI = "runs:/replace-with-week3-smoke-run"
+
+
+def require_real_serving_bundle_uri() -> None:
+    uri = os.environ.get("MLFLOW_SERVING_BUNDLE_URI", "")
+    if not uri or uri == PLACEHOLDER_BUNDLE_URI:
+        raise RuntimeError("Full smoke requires MLFLOW_SERVING_BUNDLE_URI from a real smoke training run")
+
+
+def run_command(command: list[str], *, input_text: str | None = None) -> None:
+    subprocess.run(command, check=True, input=input_text, text=input_text is not None)
+
+
+def inject_late_event() -> None:
+    late_event = {
+        "event_id": "ci-late-event-1",
+        "user_session": "ci-session-1",
+        "source_event_time": "2019-10-31T23:55:00",
+        "event_type": "view",
+        "product_id": "late-product",
+        "category_id": "cat-late",
+        "category_code": "cat.late",
+        "brand": "brand-late",
+        "price": 1.0,
+        "user_id": "u1",
+        "replay_time": "2026-05-15T09:00:00",
+        "source": "replay",
+    }
+    run_command(
+        [
+            "docker",
+            "compose",
+            "exec",
+            "-T",
+            "redpanda",
+            "rpk",
+            "topic",
+            "produce",
+            "raw_events",
+            "--brokers",
+            "redpanda:9092",
+            "--key",
+            "ci-session-1",
+        ],
+        input_text=json.dumps(late_event) + "\n",
+    )
+
+
+def verify_late_event_routed() -> None:
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "exec",
+            "-T",
+            "redpanda",
+            "rpk",
+            "topic",
+            "consume",
+            "late_events",
+            "--brokers",
+            "redpanda:9092",
+            "--num",
+            "1",
+            "--timeout",
+            "10s",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    if "ci-late-event-1" not in result.stdout:
+        raise AssertionError(result.stdout)
 
 
 def main() -> int:
@@ -389,6 +496,7 @@ def main() -> int:
     parser.add_argument("--fixture", default="data/simulation_raw/2019-Nov.csv.gz")
     parser.add_argument("--api-key", default="local-dev-api-key")
     args = parser.parse_args()
+    require_real_serving_bundle_uri()
 
     fixture_path = Path(args.fixture)
     if not fixture_path.exists():
@@ -396,6 +504,8 @@ def main() -> int:
 
     run_command(["docker", "compose", "up", "-d", "--build", "redpanda", "redpanda-init", "redis", "postgres", "mlflow", "prediction-api", "stream-processor"])
     run_command(["docker", "compose", "run", "--rm", "simulator", "python", "-m", "services.simulator.app", "--limit", "5"])
+    inject_late_event()
+    verify_late_event_routed()
     response = requests.get(
         "http://localhost:8080/api/v1/predict/ci-session-1",
         headers={"X-API-Key": args.api_key},
@@ -403,7 +513,7 @@ def main() -> int:
     )
     response.raise_for_status()
     body = response.json()
-    if body["fallback_reason"] not in (None, "redis_miss", "model_unavailable"):
+    if body["prediction_mode"] != "model" or body["fallback_reason"] is not None:
         raise AssertionError(body)
     return 0
 
@@ -421,6 +531,8 @@ Add `requests>=2.31.0` to the `dev` optional dependency list in `pyproject.toml`
 Run: `pytest services/tests/test_week3_smoke_script.py -q`
 
 Expected: pass.
+
+The smoke helper intentionally injects one late event directly to `raw_events` after normal replay has created accepted Redis state for `ci-session-1`. Do not depend on out-of-order fixture CSV input to prove late routing, because `iter_replay_events()` sorts events by `user_session` and `source_event_time`.
 
 - [ ] **Step 6: Commit**
 
@@ -525,7 +637,7 @@ python -m training.src.train \
   --device cpu
 ```
 
-Set `MLFLOW_SERVING_BUNDLE_URI` to the winner `{model}_test_evaluation` run URI, then replay a bounded batch:
+Set `MLFLOW_SERVING_BUNDLE_URI` to the winner `{model}_test_evaluation` run URI. The placeholder `runs:/replace-with-week3-smoke-run` is only a compose default and must fail full smoke. Then replay a bounded batch:
 
 ```bash
 docker compose run --rm simulator python -m services.simulator.app --limit 1000
@@ -669,6 +781,7 @@ python scripts/week3_compose_smoke.py
 ```
 
 Expected: script exits `0` and `GET /api/v1/predict/ci-session-1` returns HTTP `200`.
+The response must be model-backed with `prediction_mode="model"` and `fallback_reason=null`; `redis_miss` and `model_unavailable` are valid endpoint fallbacks but full-smoke failures.
 
 - [ ] **Step 7: Commit verification fixes**
 
@@ -679,4 +792,3 @@ git status --short
 git add <changed-week3-files>
 git commit -m "fix: stabilize week3 vertical slice"
 ```
-

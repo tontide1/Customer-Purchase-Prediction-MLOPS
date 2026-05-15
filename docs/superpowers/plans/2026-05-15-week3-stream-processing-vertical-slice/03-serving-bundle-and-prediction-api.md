@@ -4,7 +4,7 @@
 
 **Goal:** Log a real MLflow serving bundle from training and expose authenticated predictions from Redis session state through FastAPI.
 
-**Architecture:** This plan owns the serving boundary. Training logs the feature order, categorical maps, threshold, horizon, and model URI during the winner test-evaluation run; the API loads that bundle, assembles the same feature vector from Redis, and returns model or explicit fallback responses.
+**Architecture:** This plan owns the serving boundary. Training logs the feature order, categorical maps, threshold, horizon, and model artifact metadata during the winner test-evaluation run; the API loads that bundle, assembles the same feature vector from Redis, reconstructs categorical columns as `pd.Categorical` using the saved category order, and returns model or explicit fallback responses. Model-backed probabilities must come from `predict_proba(...)[..., 1]`; class-label `predict()` output is not a valid `purchase_probability`.
 
 **Tech Stack:** Python 3.11, MLflow, pandas, FastAPI, Redis, Uvicorn, pytest, Docker.
 
@@ -72,20 +72,22 @@ def test_main_logs_serving_bundle_on_winner_test_run(gold_data, monkeypatch, tmp
     assert main() == 0
     test_run = fake_mlflow.runs[-1]
     logged_dicts = {args[1]: args[0] for args, _ in test_run["dicts"]}
-    assert logged_dicts["serving/feature_column_order.json"] == [
-        "total_views",
-        "total_carts",
-        "net_cart_count",
-        "cart_to_view_ratio",
-        "unique_categories",
-        "unique_products",
-        "session_duration_sec",
-        "price",
-        "category_id",
-        "category_code",
-        "brand",
-        "event_type",
-    ]
+    assert logged_dicts["serving/feature_column_order.json"] == {
+        "columns": [
+            "total_views",
+            "total_carts",
+            "net_cart_count",
+            "cart_to_view_ratio",
+            "unique_categories",
+            "unique_products",
+            "session_duration_sec",
+            "price",
+            "category_id",
+            "category_code",
+            "brand",
+            "event_type",
+        ]
+    }
     assert logged_dicts["serving/threshold.json"] == {"optimal_threshold": 0.42}
     assert logged_dicts["serving/prediction_contract.json"] == {
         "prediction_horizon_minutes": 10,
@@ -94,6 +96,7 @@ def test_main_logs_serving_bundle_on_winner_test_run(gold_data, monkeypatch, tmp
     assert logged_dicts["serving/categorical_encoding.json"]["missing_token"] == "__MISSING__"
     assert "category_maps" in logged_dicts["serving/categorical_encoding.json"]
     assert logged_dicts["serving/model_metadata.json"]["model_type"] == "catboost"
+    assert logged_dicts["serving/model_metadata.json"]["probability_method"] == "predict_proba"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -109,19 +112,20 @@ In `training/src/train.py`, add near constants:
 ```python
 RESPONSE_CONTRACT_VERSION = "v1"
 SERVING_MODEL_ARTIFACT_PATH = "serving/model"
+SERVING_MODEL_ARTIFACT_FILE = "model.joblib"
 ```
 
 Add after `_log_model_artifact()`:
 
 ```python
 def _log_serving_model_artifact(candidate_name: str, model) -> str:
-    if candidate_name == "catboost":
-        mlflow.catboost.log_model(model, SERVING_MODEL_ARTIFACT_PATH)
-    else:
-        mlflow.sklearn.log_model(model, SERVING_MODEL_ARTIFACT_PATH)
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        model_path = Path(tmp_dir) / SERVING_MODEL_ARTIFACT_FILE
+        joblib.dump(model, model_path)
+        mlflow.log_artifact(str(model_path), artifact_path=SERVING_MODEL_ARTIFACT_PATH)
     active_run = mlflow.active_run()
     run_id = active_run.info.run_id if active_run is not None else ""
-    return f"runs:/{run_id}/{SERVING_MODEL_ARTIFACT_PATH}"
+    return f"runs:/{run_id}/{SERVING_MODEL_ARTIFACT_PATH}/{SERVING_MODEL_ARTIFACT_FILE}"
 
 
 def _log_serving_bundle(
@@ -141,11 +145,14 @@ def _log_serving_bundle(
             "run_id": run_id,
             "model_uri": model_uri,
             "artifact_path": SERVING_MODEL_ARTIFACT_PATH,
+            "artifact_file": SERVING_MODEL_ARTIFACT_FILE,
+            "load_flavor": "joblib",
+            "probability_method": "predict_proba",
         },
         "serving/model_metadata.json",
     )
     mlflow.log_dict(
-        data.numeric_columns + data.categorical_columns,
+        {"columns": data.numeric_columns + data.categorical_columns},
         "serving/feature_column_order.json",
     )
     mlflow.log_dict(
@@ -167,6 +174,14 @@ def _log_serving_bundle(
         },
         "serving/prediction_contract.json",
     )
+```
+
+Also add the required imports near the top of `training/src/train.py`:
+
+```python
+import tempfile
+
+import joblib
 ```
 
 Inside the existing winner test-evaluation run in `main()`, after `_log_winner_shap_artifacts(...)`, add:
@@ -191,6 +206,7 @@ In `training/tests/test_train.py`, update `_DummyRun.__enter__()`:
             "metrics": [],
             "dicts": [],
             "texts": [],
+            "artifacts": [],
         }
         self.mlflow.runs.append(run)
         self.mlflow._current_run = run
@@ -219,6 +235,13 @@ Add `_FakeMlflow.active_run()`:
 ```python
     def active_run(self):
         return self._active_run
+```
+
+Add `_FakeMlflow.log_artifact()`:
+
+```python
+    def log_artifact(self, local_path, artifact_path=None):
+        self._current_run["artifacts"].append((local_path, artifact_path))
 ```
 
 - [ ] **Step 5: Run test to verify it passes**
@@ -342,11 +365,13 @@ def test_build_feature_row_matches_online_state_semantics():
         "unique_products": 2,
         "session_duration_sec": 120.0,
         "price": 0.0,
-        "category_id": 2,
-        "category_code": 0,
-        "brand": 0,
-        "event_type": 2,
+        "category_id": "cat-id",
+        "category_code": "__MISSING__",
+        "brand": "__MISSING__",
+        "event_type": "cart",
     }
+    assert str(row["category_id"].dtype) == "category"
+    assert list(row["category_id"].cat.categories) == ["__MISSING__", "__UNK__", "cat-id"]
 
 
 def test_build_feature_row_returns_none_on_redis_miss():
@@ -380,6 +405,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import joblib
 import mlflow
 
 SUPPORTED_RESPONSE_CONTRACT_VERSION = "v1"
@@ -412,12 +438,13 @@ def load_serving_bundle(run_uri: str) -> ServingBundle:
     threshold = mlflow.artifacts.load_dict(f"{run_uri}/serving/threshold.json")
     prediction_contract = mlflow.artifacts.load_dict(f"{run_uri}/serving/prediction_contract.json")
     validate_prediction_contract(prediction_contract)
-    model = mlflow.pyfunc.load_model(model_metadata["model_uri"])
+    local_model_path = mlflow.artifacts.download_artifacts(model_metadata["model_uri"])
+    model = joblib.load(local_model_path)
     return ServingBundle(
         model=model,
         model_uri=model_metadata["model_uri"],
         model_version=model_metadata["run_id"],
-        feature_column_order=list(feature_column_order),
+        feature_column_order=list(feature_column_order["columns"]),
         category_maps=categorical_encoding["category_maps"],
         missing_token=categorical_encoding["missing_token"],
         unknown_token=categorical_encoding["unknown_token"],
@@ -447,9 +474,15 @@ def _text(value) -> str:
     return str(value)
 
 
-def _encode(value: str, mapping: dict[str, int], *, missing_token: str, unknown_token: str) -> int:
+def _categorical_value(
+    value: str,
+    mapping: dict[str, int],
+    *,
+    missing_token: str,
+    unknown_token: str,
+) -> str:
     normalized = missing_token if value == "" else value
-    return int(mapping.get(normalized, mapping[unknown_token]))
+    return normalized if normalized in mapping else unknown_token
 
 
 def build_feature_row(redis_client, user_session: str, bundle: ServingBundle) -> pd.DataFrame | None:
@@ -474,32 +507,39 @@ def build_feature_row(redis_client, user_session: str, bundle: ServingBundle) ->
         "unique_products": redis_client.scard(f"{hash_key}:products"),
         "session_duration_sec": (last_time - first_time).total_seconds(),
         "price": float(_text(state.get("latest_price", "0"))),
-        "category_id": _encode(
+        "category_id": _categorical_value(
             _text(state["latest_category_id"]),
             bundle.category_maps["category_id"],
             missing_token=bundle.missing_token,
             unknown_token=bundle.unknown_token,
         ),
-        "category_code": _encode(
+        "category_code": _categorical_value(
             _text(state.get("latest_category_code", "")),
             bundle.category_maps["category_code"],
             missing_token=bundle.missing_token,
             unknown_token=bundle.unknown_token,
         ),
-        "brand": _encode(
+        "brand": _categorical_value(
             _text(state.get("latest_brand", "")),
             bundle.category_maps["brand"],
             missing_token=bundle.missing_token,
             unknown_token=bundle.unknown_token,
         ),
-        "event_type": _encode(
+        "event_type": _categorical_value(
             _text(state["latest_event_type"]),
             bundle.category_maps["event_type"],
             missing_token=bundle.missing_token,
             unknown_token=bundle.unknown_token,
         ),
     }
-    return pd.DataFrame([{column: values[column] for column in bundle.feature_column_order}])
+    frame = pd.DataFrame([{column: values[column] for column in bundle.feature_column_order}])
+    for column, mapping in bundle.category_maps.items():
+        frame[column] = pd.Categorical(
+            frame[column],
+            categories=list(mapping.keys()),
+            ordered=False,
+        )
+    return frame
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
@@ -675,8 +715,8 @@ def create_app(
             return _fallback_response("redis_miss", horizon_minutes=horizon)
 
         try:
-            proba = bundle.model.predict(row)
-            score = float(proba[0])
+            proba = bundle.model.predict_proba(row)
+            score = float(proba[:, 1][0])
         except Exception:
             return _fallback_response("model_unavailable", horizon_minutes=horizon)
 
@@ -712,6 +752,7 @@ Create `services/prediction_api/requirements.txt`:
 
 ```text
 fastapi>=0.115.0
+joblib>=1.3.0
 mlflow>=2.8.0
 pandas>=2.2.0
 redis>=5.0.0
@@ -746,6 +787,8 @@ Append to `services/tests/test_prediction_api.py`:
 
 ```python
 def test_predict_model_backed_response_shape():
+    import numpy as np
+
     from services.prediction_api.bundle import ServingBundle
 
     class FakeRedisHit:
@@ -767,8 +810,8 @@ def test_predict_model_backed_response_shape():
             return 1
 
     class FakeModel:
-        def predict(self, row):
-            return [0.73]
+        def predict_proba(self, row):
+            return np.array([[0.27, 0.73]])
 
     bundle = ServingBundle(
         model=FakeModel(),
@@ -832,4 +875,3 @@ Expected: all tests pass.
 git add services/prediction_api/app.py services/prediction_api/requirements.txt services/prediction_api/Dockerfile services/tests/test_prediction_api.py
 git commit -m "feat: add authenticated prediction api"
 ```
-

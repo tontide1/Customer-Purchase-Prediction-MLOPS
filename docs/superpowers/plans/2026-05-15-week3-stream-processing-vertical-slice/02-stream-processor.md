@@ -6,6 +6,8 @@
 
 **Architecture:** This plan owns the stateful processing middle of the Week 3 slice. It keeps feature-state semantics aligned with Week 2 gold features while making duplicate and late-event policy explicit and bounded.
 
+Late-event behavior is tested here at the processor boundary with explicit event ordering. Full integration smoke should first publish normal replay state, then inject a deliberately old event to `raw_events`; simulator CSV order is not a valid late-event proof because the simulator sorts per session before publishing.
+
 **Tech Stack:** Python 3.11, Quix Streams, Redis, PostgreSQL, psycopg, pytest, Docker.
 
 ---
@@ -680,4 +682,3 @@ Expected: `1 passed`.
 git add services/stream_processor/app.py services/stream_processor/requirements.txt services/stream_processor/Dockerfile services/tests/test_stream_processor_app.py
 git commit -m "feat: add stream processor service entrypoint"
 ```
-

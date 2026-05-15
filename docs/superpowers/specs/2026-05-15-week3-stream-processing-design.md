@@ -47,9 +47,13 @@ The goal is to prove that replay events can be ingested, transformed into sessio
 - Derived features (`net_cart_count`, `cart_to_view_ratio`, `session_duration_sec`) are computed by the prediction API when assembling the feature vector, using the raw counters and timestamps stored in Redis. The stream processor stores only the raw state; no derived values are persisted in Redis.
 - Redis null handling must mirror the training preprocessing contract:
   - `price` null is stored as `latest_price=0`, matching numeric `fillna(0)`.
-  - `category_code` null is stored as an empty string in Redis. When assembling the feature vector, the API must pre-process the value: if the value read from Redis is the empty string `""`, replace it with the `missing_token` from the serving bundle's `categorical_encoding.json` (currently `__MISSING__`) before looking up the encoding map.
-  - `brand` null is stored as an empty string in Redis. The API applies the same pre-process as `category_code`: empty string → `missing_token` before encoding lookup.
+  - `category_code` null is stored as an empty string in Redis. When assembling the feature vector, the API must pre-process the value: if the value read from Redis is the empty string `""`, replace it with the `missing_token` from the serving bundle's `categorical_encoding.json` (currently `__MISSING__`) before reconstructing the categorical column.
+  - `brand` null is stored as an empty string in Redis. The API applies the same pre-process as `category_code`: empty string -> `missing_token` before categorical reconstruction.
   - `category_id` and `event_type` are required for accepted events; invalid rows missing them are skipped before Redis update.
+- API feature assembly must mirror `training/src/categorical_features.py`:
+  - Numeric columns remain numeric after Redis conversion.
+  - Categorical values are normalized to `missing_token` / `unknown_token` using the saved `category_maps`.
+  - Categorical columns are rebuilt as `pd.Categorical` with `categories=list(category_maps[column].keys())`, not integer IDs.
 - Every `session:*` key written for a session must receive a TTL. The default TTL is 30 minutes, configurable by environment variable.
 - Every accepted update must delete `cache:predict:session:{user_session}` so the API never serves stale session features.
 
@@ -79,6 +83,7 @@ The goal is to prove that replay events can be ingested, transformed into sessio
 - Require `X-API-Key` on business endpoints.
 - The API key is configured through an `API_KEY` environment variable on the prediction-api container. The value must not be hardcoded or logged.
 - The API loads a minimal serving bundle from MLflow produced by a training smoke run, not from a mocked object and not from the full registry promotion flow.
+- `purchase_probability` must be computed from probability output: `predict_proba(row)[:, 1]` for model APIs that expose it. A loaded model without class-1 probability output is treated as `model_unavailable`.
 - Successful predict responses must include `purchase_probability`, `prediction_time`, `prediction_horizon_minutes`, `model_uri`, `model_version`, `prediction_mode="model"`, `fallback_reason=null`, and `cached=false`.
 - Fallback behavior is explicit:
   - Redis miss returns `200` with score `0.5` and `fallback_reason="redis_miss"`.
@@ -99,11 +104,12 @@ The goal is to prove that replay events can be ingested, transformed into sessio
 - The serving bundle artifacts are logged during the `{winner_name}_test_evaluation` MLflow run using the already-available `data.categorical_columns`, `data.numeric_columns`, `data.categorical_artifacts` (`CategoricalEncodingArtifacts`), and `winner_threshold` from the existing training orchestration.
 - The serving bundle must be logged on the existing `{winner_name}_test_evaluation` MLflow run so the API has one canonical winner run to inspect. Do not create a separate `{winner_name}_serving_bundle` run in Week 3.
 - The serving bundle must include:
-  - `serving/model_metadata.json`: model type/name, run ID, model URI, and artifact path.
-  - `serving/feature_column_order.json`: `NUMERIC_FEATURE_COLUMNS + CATEGORICAL_FEATURE_COLUMNS`.
+  - `serving/model_metadata.json`: model type/name, run ID, load flavor, artifact path/file, model URI, and `probability_method="predict_proba"`.
+  - `serving/feature_column_order.json`: object payload `{"columns": NUMERIC_FEATURE_COLUMNS + CATEGORICAL_FEATURE_COLUMNS}`.
   - `serving/categorical_encoding.json`: `CategoricalEncodingArtifacts.category_maps` plus missing/unknown token metadata.
   - `serving/threshold.json`: selected winner `optimal_threshold`.
   - `serving/prediction_contract.json`: `PREDICTION_HORIZON_MINUTES` and `response_contract_version`.
+- The API must load the model from the serving bundle's artifact metadata, not by calling MLflow logged-model APIs that may be unsupported by the local tracking server.
 - `response_contract_version` is the fixed string `v1` for Week 3. The API must reject bundles with a different response contract version.
 - This is a minimal bundle for API consumption. It is not a model registry promotion workflow and does not introduce hot reload.
 
@@ -121,20 +127,24 @@ The goal is to prove that replay events can be ingested, transformed into sessio
   - `total_remove_from_cart`, `first_event_time`, latest feature fields, TTL, null handling, and normalized category semantics
   - PostgreSQL append behavior
   - MLflow serving bundle artifact contents
+  - categorical feature assembly parity with Week 2 `transform_with_categorical_contract`
   - API key validation
   - Redis miss fallback
   - model-unavailable fallback
+  - prediction API probability output via `predict_proba(...)[..., 1]`
   - model-backed prediction response shape
 
 - Compose integration smoke in CI should:
   - install root and service dependencies
   - verify `data/simulation_raw/2019-Nov.csv.gz` exists for local runs or provision a small CI CSV fixture with the same raw input schema as `2019-Nov.csv.gz`
-  - the CI fixture must include at least two sessions, at least one `view`, `cart`, `remove_from_cart`, and `purchase`, at least one nullable `category_code` or `brand`, and at least one out-of-order event that triggers `late_events`
+  - the CI fixture must include at least two sessions, at least one `view`, `cart`, `remove_from_cart`, and `purchase`, and at least one nullable `category_code` or `brand`
   - start the full local stack
   - run a training smoke to create the MLflow serving bundle
   - run bounded replay through the simulator and processor
+  - inject a direct late event for an existing session after accepted replay state exists, because the simulator sorts per session and an out-of-order CSV row must not be the late-event proof
   - verify Redis state, PostgreSQL append log, and `late_events`
-  - call authenticated `GET /api/v1/predict/{user_session}` and verify a model-backed response
+  - call authenticated `GET /api/v1/predict/{user_session}` and verify a model-backed response with `prediction_mode="model"` and `fallback_reason=null`
+  - fail full smoke if the response is `redis_miss` or `model_unavailable`; those remain valid endpoint fallbacks but are not acceptable full-smoke success criteria
 
 - Existing repository checks should continue to run:
   - `ruff check .`
