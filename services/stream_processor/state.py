@@ -48,7 +48,9 @@ def _normalize_utc_timestamp_text(value: Any) -> str:
     return timestamp.isoformat()
 
 
-def apply_event_to_session_state(redis_client, event: dict[str, Any], *, ttl_seconds: int) -> None:
+def apply_event_to_session_state(
+    redis_client, event: dict[str, Any], *, ttl_seconds: int
+) -> None:
     session = event["user_session"]
     hash_key = f"session:{session}"
     products_key = f"{hash_key}:products"

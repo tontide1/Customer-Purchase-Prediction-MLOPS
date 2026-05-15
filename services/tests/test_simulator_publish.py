@@ -76,10 +76,14 @@ def test_iter_replay_events_is_bounded_and_sorted_within_session(tmp_path):
         ]
     ).to_csv(csv_path, index=False, compression="gzip")
 
-    events = list(iter_replay_events(csv_path, limit=2, replay_time="2026-05-15T09:00:00"))
+    events = list(
+        iter_replay_events(csv_path, limit=2, replay_time="2026-05-15T09:00:00")
+    )
 
     assert len(events) == 2
-    assert [event["source_event_time"] for event in events if event["user_session"] == "s1"] == [
+    assert [
+        event["source_event_time"] for event in events if event["user_session"] == "s1"
+    ] == [
         "2019-11-01T00:01:00",
         "2019-11-01T00:03:00",
     ]

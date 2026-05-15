@@ -17,14 +17,20 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--input",
-        default=os.getenv("SIMULATION_RAW_DATA_PATH", "data/simulation_raw/2019-Nov.csv.gz"),
+        default=os.getenv(
+            "SIMULATION_RAW_DATA_PATH", "data/simulation_raw/2019-Nov.csv.gz"
+        ),
     )
-    parser.add_argument("--limit", type=int, default=int(os.getenv("REPLAY_LIMIT", "1000")))
+    parser.add_argument(
+        "--limit", type=int, default=int(os.getenv("REPLAY_LIMIT", "1000"))
+    )
     parser.add_argument("--broker", default=os.getenv("KAFKA_BROKER", "redpanda:9092"))
     parser.add_argument("--topic", default=os.getenv("RAW_EVENTS_TOPIC", "raw_events"))
     args = parser.parse_args()
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+    )
     app = Application(broker_address=args.broker)
     topic = app.topic(args.topic, value_serializer="json", key_serializer="str")
     events = iter_replay_events(args.input, limit=args.limit)

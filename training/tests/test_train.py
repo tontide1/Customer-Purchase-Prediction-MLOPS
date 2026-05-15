@@ -121,16 +121,24 @@ class _FakeMlflow:
         self.logged_models = []
         self.logged_artifacts = []
         self.sklearn = SimpleNamespace(
-            log_model=lambda *args, **kwargs: self._log_model("sklearn", *args, **kwargs)
+            log_model=lambda *args, **kwargs: self._log_model(
+                "sklearn", *args, **kwargs
+            )
         )
         self.catboost = SimpleNamespace(
-            log_model=lambda *args, **kwargs: self._log_model("catboost", *args, **kwargs)
+            log_model=lambda *args, **kwargs: self._log_model(
+                "catboost", *args, **kwargs
+            )
         )
         self.lightgbm = SimpleNamespace(
-            log_model=lambda *args, **kwargs: self._log_model("lightgbm", *args, **kwargs)
+            log_model=lambda *args, **kwargs: self._log_model(
+                "lightgbm", *args, **kwargs
+            )
         )
         self.xgboost = SimpleNamespace(
-            log_model=lambda *args, **kwargs: self._log_model("xgboost", *args, **kwargs)
+            log_model=lambda *args, **kwargs: self._log_model(
+                "xgboost", *args, **kwargs
+            )
         )
 
     def _log_model(self, flavor, *args, **kwargs):
@@ -358,7 +366,9 @@ def test_main_logs_winner_shap_artifacts(gold_data, monkeypatch):
             "summary_plot_path": str(shap_summary),
         }
 
-    monkeypatch.setattr("training.src.train.generate_shap_artifacts", fake_generate_shap_artifacts)
+    monkeypatch.setattr(
+        "training.src.train.generate_shap_artifacts", fake_generate_shap_artifacts
+    )
     monkeypatch.setattr(
         "training.src.train.serialize_explainer",
         lambda explainer, path: Path(path).write_bytes(b"explainer"),
