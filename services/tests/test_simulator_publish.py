@@ -123,6 +123,17 @@ def test_publish_events_rejects_raw_string_topic():
         raise AssertionError("publish_events() did not reject a raw string topic")
 
 
+def test_publish_events_rejects_raw_string_topic_without_events():
+    producer = FakeProducer()
+
+    try:
+        publish_events([], producer=producer, topic="raw_events")
+    except TypeError as exc:
+        assert str(exc) == "topic must provide .name and .serialize(key=..., value=...)"
+    else:
+        raise AssertionError("publish_events() did not reject a raw string topic")
+
+
 def test_publish_events_serializes_with_quix_topic_and_flushes_once():
     producer = FakeProducer()
     events = [

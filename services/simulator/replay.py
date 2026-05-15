@@ -117,11 +117,12 @@ def publish_events(
     producer,
     topic: Any,
 ) -> int:
+    if not hasattr(topic, "name") or not hasattr(topic, "serialize"):
+        raise TypeError("topic must provide .name and .serialize(key=..., value=...)")
+
     count = 0
     for event in events:
         key = event["user_session"]
-        if not hasattr(topic, "name") or not hasattr(topic, "serialize"):
-            raise TypeError("topic must provide .name and .serialize(key=..., value=...)")
         message = topic.serialize(key=key, value=event)
         producer.produce(topic=topic.name, key=message.key, value=message.value)
         count += 1
