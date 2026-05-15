@@ -85,7 +85,7 @@ def normalize_raw_row(row: dict[str, Any], replay_time: str | None = None) -> di
         "category_code": _nullable_text(row.get("category_code")),
         "brand": _nullable_text(row.get("brand")),
         "price": _nullable_float(row.get("price")),
-        "replay_time": replay_time or dt.datetime.utcnow().replace(microsecond=0).isoformat(),
+        "replay_time": replay_time or dt.datetime.now(dt.timezone.utc).replace(tzinfo=None, microsecond=0).isoformat(),
         "source": "replay",
     }
     normalized["event_id"] = compute_event_id(
