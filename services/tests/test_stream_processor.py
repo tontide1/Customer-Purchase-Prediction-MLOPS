@@ -61,7 +61,7 @@ def _event(**overrides):
     event = {
         "event_id": "event-1",
         "user_session": "session-1",
-        "source_event_time": "2019-11-01T00:00:00",
+        "source_event_time": "2019-11-01T00:00:00+00:00",
         "event_type": "view",
         "product_id": "100",
         "user_id": "42",
@@ -95,8 +95,8 @@ def test_process_event_routes_late_event_and_skips_state_and_postgres():
     late = FakeLateProducer()
     store = FakeReplayStore()
 
-    accepted = _event(event_id="e1", source_event_time="2019-11-01T00:02:00")
-    late_event = _event(event_id="e2", source_event_time="2019-11-01T00:00:30")
+    accepted = _event(event_id="e1", source_event_time="2019-11-01T00:02:00+00:00")
+    late_event = _event(event_id="e2", source_event_time="2019-11-01T00:00:30+00:00")
     redis.hashes["session:session-1"] = {"last_event_time": accepted["source_event_time"]}
 
     assert process_event(redis, store, late, accepted, late_topic="late_events") == "accepted"
@@ -177,6 +177,61 @@ def test_process_event_cleans_up_dedup_key_when_pipeline_execute_fails():
     assert redis.sets == {}
     assert "dedup:event:event-1" not in redis.values
     assert "dedup:event:event-1" in redis.deleted
+    assert late.messages == []
+
+
+def test_process_event_uses_pipeline_for_accepted_events():
+    class RecordingPipeline:
+        def __init__(self):
+            self.commands = []
+            self.execute_called = False
+
+        def hset(self, key, mapping):
+            self.commands.append(("hset", key, mapping))
+            return self
+
+        def sadd(self, key, value):
+            self.commands.append(("sadd", key, value))
+            return self
+
+        def expire(self, key, ttl_seconds):
+            self.commands.append(("expire", key, ttl_seconds))
+            return self
+
+        def delete(self, key):
+            self.commands.append(("delete", key))
+            return self
+
+        def execute(self):
+            self.execute_called = True
+            return True
+
+    class PipelineRedis(FakeRedis):
+        def __init__(self):
+            super().__init__()
+            self.pipeline_obj = RecordingPipeline()
+            self.pipeline_calls = []
+
+        def pipeline(self, transaction=True):
+            self.pipeline_calls.append(transaction)
+            return self.pipeline_obj
+
+    redis = PipelineRedis()
+    late = FakeLateProducer()
+    store = FakeReplayStore()
+
+    assert process_event(redis, store, late, _event(), late_topic="late_events") == "accepted"
+
+    assert redis.pipeline_calls == [True]
+    assert redis.pipeline_obj.execute_called is True
+    assert ("hset", "session:session-1", redis.pipeline_obj.commands[0][2]) in [
+        (cmd[0], cmd[1], cmd[2]) for cmd in redis.pipeline_obj.commands if cmd[0] == "hset"
+    ]
+    assert ("sadd", "session:session-1:products", "100") in redis.pipeline_obj.commands
+    assert ("sadd", "session:session-1:categories", "cat-id") in redis.pipeline_obj.commands
+    assert ("expire", "session:session-1", 1800) in redis.pipeline_obj.commands
+    assert ("delete", "cache:predict:session:session-1") in redis.pipeline_obj.commands
+    assert store.events == [_event()]
     assert late.messages == []
 
 

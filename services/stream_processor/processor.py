@@ -11,7 +11,11 @@ from services.stream_processor.state import apply_event_to_session_state
 def _parse_iso_timestamp(value: Any) -> dt.datetime:
     if isinstance(value, bytes):
         value = value.decode("utf-8")
-    return dt.datetime.fromisoformat(str(value))
+    text = str(value).replace("Z", "+00:00")
+    timestamp = dt.datetime.fromisoformat(text)
+    if timestamp.tzinfo is None:
+        return timestamp.replace(tzinfo=dt.timezone.utc)
+    return timestamp.astimezone(dt.timezone.utc)
 
 
 def _last_event_time(redis_client, user_session: str) -> dt.datetime | None:

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import datetime as dt
+import math
 from typing import Any
-
-import pandas as pd
 
 from training.src.features import normalize_category_value
 
@@ -16,11 +16,9 @@ def _redis_text(value: Any) -> str:
 
 
 def _is_missing(value: Any) -> bool:
-    if value is None:
-        return True
-    if isinstance(value, str):
-        return value == ""
-    return bool(pd.isna(value))
+    return value is None or value == "" or (
+        isinstance(value, float) and math.isnan(value)
+    )
 
 
 def _state_value(state: dict, key: str, default: str) -> str:
@@ -30,6 +28,16 @@ def _state_value(state: dict, key: str, default: str) -> str:
 
 def _latest_nullable_text(value: Any) -> str:
     return "" if _is_missing(value) else str(value)
+
+
+def _normalize_utc_timestamp_text(value: Any) -> str:
+    text = _redis_text(value).replace("Z", "+00:00")
+    timestamp = dt.datetime.fromisoformat(text)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=dt.timezone.utc)
+    else:
+        timestamp = timestamp.astimezone(dt.timezone.utc)
+    return timestamp.isoformat()
 
 
 def apply_event_to_session_state(redis_client, event: dict[str, Any], *, ttl_seconds: int) -> None:
@@ -50,12 +58,15 @@ def apply_event_to_session_state(redis_client, event: dict[str, Any], *, ttl_sec
     elif event["event_type"] == "remove_from_cart":
         count_remove += 1
 
-    first_event_time = _state_value(current, "first_event_time", event["source_event_time"])
+    first_event_time = _normalize_utc_timestamp_text(
+        _state_value(current, "first_event_time", event["source_event_time"])
+    )
+    last_event_time = _normalize_utc_timestamp_text(event["source_event_time"])
     price = 0 if _is_missing(event.get("price")) else event["price"]
 
     mapping = {
         "first_event_time": first_event_time,
-        "last_event_time": event["source_event_time"],
+        "last_event_time": last_event_time,
         "count_view": str(count_view),
         "count_cart": str(count_cart),
         "count_remove_from_cart": str(count_remove),
