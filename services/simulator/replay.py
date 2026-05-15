@@ -105,3 +105,17 @@ def iter_replay_events(
     frame = frame.sort_values(["user_session", constants.FIELD_EVENT_TIME], kind="mergesort")
     for row in frame.to_dict(orient="records"):
         yield normalize_raw_row(row, replay_time=replay_time)
+
+
+def publish_events(
+    events: Iterable[dict[str, Any]],
+    *,
+    producer,
+    topic: str,
+) -> int:
+    count = 0
+    for event in events:
+        producer.produce(topic=topic, key=event["user_session"], value=event)
+        count += 1
+    producer.flush()
+    return count
