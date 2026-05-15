@@ -85,7 +85,7 @@ def test_iter_replay_events_is_bounded_and_sorted_within_session(tmp_path):
     ]
 
 
-def test_publish_events_uses_user_session_as_key():
+def test_publish_events_serializes_key_with_quix_topic():
     producer = FakeProducer()
     event = {
         "event_id": "event-1",
@@ -93,14 +93,34 @@ def test_publish_events_uses_user_session_as_key():
         "source_event_time": "2019-11-01T00:00:00",
     }
 
-    count = publish_events([event], producer=producer, topic="raw_events")
+    count = publish_events([event], producer=producer, topic=FakeTopic())
 
     assert count == 1
     assert producer.messages == [
-        {"topic": "raw_events", "key": "session-1", "value": event}
+        {
+            "topic": "raw_events",
+            "key": "serialized-key:session-1",
+            "value": {"serialized": event},
+        }
     ]
     assert producer.flush_count == 1
     assert producer.flushed is True
+
+
+def test_publish_events_rejects_raw_string_topic():
+    producer = FakeProducer()
+    event = {
+        "event_id": "event-1",
+        "user_session": "session-1",
+        "source_event_time": "2019-11-01T00:00:00",
+    }
+
+    try:
+        publish_events([event], producer=producer, topic="raw_events")
+    except TypeError as exc:
+        assert str(exc) == "topic must provide .name and .serialize(key=..., value=...)"
+    else:
+        raise AssertionError("publish_events() did not reject a raw string topic")
 
 
 def test_publish_events_serializes_with_quix_topic_and_flushes_once():

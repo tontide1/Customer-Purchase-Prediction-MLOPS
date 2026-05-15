@@ -115,16 +115,15 @@ def publish_events(
     events: Iterable[dict[str, Any]],
     *,
     producer,
-    topic: str | Any,
+    topic: Any,
 ) -> int:
     count = 0
     for event in events:
         key = event["user_session"]
-        if hasattr(topic, "serialize"):
-            message = topic.serialize(key=key, value=event)
-            producer.produce(topic=topic.name, key=message.key, value=message.value)
-        else:
-            producer.produce(topic=topic, key=key, value=event)
+        if not hasattr(topic, "name") or not hasattr(topic, "serialize"):
+            raise TypeError("topic must provide .name and .serialize(key=..., value=...)")
+        message = topic.serialize(key=key, value=event)
+        producer.produce(topic=topic.name, key=message.key, value=message.value)
         count += 1
     producer.flush()
     return count

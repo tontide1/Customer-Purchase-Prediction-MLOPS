@@ -28,8 +28,8 @@ def main() -> int:
     app = Application(broker_address=args.broker)
     topic = app.topic(args.topic, value_serializer="json", key_serializer="str")
     events = iter_replay_events(args.input, limit=args.limit)
-    with app.get_producer() as producer:
-        count = publish_events(events, producer=producer, topic=topic)
+    producer = app.get_producer()
+    count = publish_events(events, producer=producer, topic=topic)
     logger.info("Published %d replay events to %s", count, args.topic)
     return 0
 
