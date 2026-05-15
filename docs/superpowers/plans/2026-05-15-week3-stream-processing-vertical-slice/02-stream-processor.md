@@ -6,7 +6,9 @@
 
 **Architecture:** This plan owns the stateful processing middle of the Week 3 slice. It keeps feature-state semantics aligned with Week 2 gold features while making duplicate and late-event policy explicit and bounded.
 
-Late-event behavior is tested here at the processor boundary with explicit event ordering. Full integration smoke should first publish normal replay state, then inject a deliberately old event to `raw_events`; simulator CSV order is not a valid late-event proof because the simulator sorts per session before publishing.
+Late-event behavior is tested here at the processor boundary with explicit event ordering. The processor marks mutable events with an internal `_stream_processor_status`, and the Quix entrypoint routes late records through a filtered StreamingDataFrame branch and `to_topic`; `process_event` must not use a low-level producer. Full integration smoke should first publish normal replay state, then inject a deliberately old event to `raw_events`; simulator CSV order is not a valid late-event proof because the simulator sorts per session before publishing.
+
+`PROCESSING_GUARANTEE` defaults to `exactly-once` for Quix Kafka output/checkpointing. Redis and PostgreSQL are external side effects, so they still rely on Redis dedup keys and PostgreSQL conflict handling rather than Quix transactions.
 
 **Tech Stack:** Python 3.11, Quix Streams, Redis, PostgreSQL, psycopg, pytest, Docker.
 
@@ -296,14 +298,6 @@ class FakeRedis:
         self.deleted.append(key)
 
 
-class FakeLateProducer:
-    def __init__(self):
-        self.messages = []
-
-    def produce(self, *, topic, key, value):
-        self.messages.append({"topic": topic, "key": key, "value": value})
-
-
 class FakeReplayStore:
     def __init__(self):
         self.rows = []
@@ -333,43 +327,41 @@ def _event(**overrides):
 
 def test_process_event_suppresses_duplicate_event_ids():
     redis = FakeRedis()
-    late = FakeLateProducer()
     store = FakeReplayStore()
+    accepted = _event()
+    duplicate = _event()
 
-    assert process_event(redis, store, late, _event(), late_topic="late_events") == "accepted"
-    assert process_event(redis, store, late, _event(), late_topic="late_events") == "duplicate"
+    assert process_event(redis, store, accepted) == "accepted"
+    assert process_event(redis, store, duplicate) == "duplicate"
 
     assert len(store.rows) == 1
-    assert late.messages == []
+    assert accepted["_stream_processor_status"] == "accepted"
+    assert duplicate["_stream_processor_status"] == "duplicate"
+    assert "late_reason" not in duplicate
     assert redis.ttls["dedup:event:event-1"] == 1800
 
 
 def test_process_event_routes_late_event_away_from_state_and_postgres():
     redis = FakeRedis()
-    late = FakeLateProducer()
     store = FakeReplayStore()
 
     process_event(
         redis,
         store,
-        late,
         _event(event_id="e1", source_event_time="2019-11-01T00:02:00"),
-        late_topic="late_events",
     )
+    late_event = _event(event_id="e2", source_event_time="2019-11-01T00:00:30")
     result = process_event(
         redis,
         store,
-        late,
-        _event(event_id="e2", source_event_time="2019-11-01T00:00:30"),
-        late_topic="late_events",
+        late_event,
         late_threshold_seconds=60,
     )
 
     assert result == "late"
     assert len(store.rows) == 1
-    assert late.messages[0]["topic"] == "late_events"
-    assert late.messages[0]["key"] == "session-1"
-    assert late.messages[0]["value"]["late_reason"] == "older_than_last_event_time_by_more_than_60s"
+    assert late_event["_stream_processor_status"] == "late"
+    assert late_event["late_reason"] == "older_than_last_event_time_by_more_than_60s"
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -418,31 +410,26 @@ def _is_late(redis_client, event: dict[str, Any], *, late_threshold_seconds: int
 def process_event(
     redis_client,
     replay_store,
-    late_producer,
     event: dict[str, Any],
     *,
-    late_topic: str,
     ttl_seconds: int = 1800,
     late_threshold_seconds: int = 60,
 ) -> str:
     dedup_key = f"dedup:event:{event['event_id']}"
     if not redis_client.set(dedup_key, "1", nx=True, ex=ttl_seconds):
+        event["_stream_processor_status"] = "duplicate"
         return "duplicate"
 
     if _is_late(redis_client, event, late_threshold_seconds=late_threshold_seconds):
-        late_event = dict(event)
-        late_event["late_reason"] = (
+        event["late_reason"] = (
             f"older_than_last_event_time_by_more_than_{late_threshold_seconds}s"
         )
-        late_producer.produce(
-            topic=late_topic,
-            key=event["user_session"],
-            value=late_event,
-        )
+        event["_stream_processor_status"] = "late"
         return "late"
 
     apply_event_to_session_state(redis_client, event, ttl_seconds=ttl_seconds)
     replay_store.append(event)
+    event["_stream_processor_status"] = "accepted"
     return "accepted"
 ```
 
@@ -545,6 +532,7 @@ def test_stream_processor_settings_defaults():
     assert settings.postgres_dsn == "postgresql://mlops:mlops@postgres:5432/mlops"
     assert settings.session_ttl_seconds == 1800
     assert settings.late_threshold_seconds == 60
+    assert settings.processing_guarantee == "exactly-once"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -570,7 +558,7 @@ import redis
 from quixstreams import Application
 
 from services.stream_processor.db import ReplayEventStore
-from services.stream_processor.processor import process_event
+from services.stream_processor.processor import STREAM_PROCESSOR_STATUS_FIELD, process_event
 
 
 @dataclass(frozen=True)
@@ -583,6 +571,7 @@ class StreamProcessorSettings:
     postgres_dsn: str
     session_ttl_seconds: int
     late_threshold_seconds: int
+    processing_guarantee: str
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "StreamProcessorSettings":
@@ -596,7 +585,14 @@ class StreamProcessorSettings:
             postgres_dsn=source.get("POSTGRES_DSN", "postgresql://mlops:mlops@postgres:5432/mlops"),
             session_ttl_seconds=int(source.get("SESSION_TTL_SECONDS", "1800")),
             late_threshold_seconds=int(source.get("LATE_EVENT_THRESHOLD_SECONDS", "60")),
+            processing_guarantee=source.get("PROCESSING_GUARANTEE", "exactly-once"),
         )
+
+
+def strip_internal_status(event: dict[str, Any]) -> dict[str, Any]:
+    clean_event = dict(event)
+    clean_event.pop(STREAM_PROCESSOR_STATUS_FIELD, None)
+    return clean_event
 
 
 def build_app(settings: StreamProcessorSettings) -> Application:
@@ -604,6 +600,7 @@ def build_app(settings: StreamProcessorSettings) -> Application:
         broker_address=settings.kafka_broker,
         consumer_group=settings.consumer_group,
         auto_offset_reset="earliest",
+        processing_guarantee=settings.processing_guarantee,
     )
     raw_topic = application.topic(
         settings.raw_topic,
@@ -618,19 +615,23 @@ def build_app(settings: StreamProcessorSettings) -> Application:
     redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
     connection = psycopg.connect(settings.postgres_dsn)
     replay_store = ReplayEventStore(connection)
-    late_producer = application.get_producer()
 
     sdf = application.dataframe(raw_topic)
-    sdf.apply(
+    sdf = sdf.update(
         lambda event: process_event(
             redis_client,
             replay_store,
-            late_producer,
             event,
-            late_topic=late_topic.name,
             ttl_seconds=settings.session_ttl_seconds,
             late_threshold_seconds=settings.late_threshold_seconds,
         )
+    )
+    late_sdf = sdf[
+        sdf.apply(lambda event: event.get(STREAM_PROCESSOR_STATUS_FIELD) == "late")
+    ]
+    late_sdf.apply(strip_internal_status).to_topic(
+        late_topic,
+        key=lambda event: event["user_session"],
     )
     return application
 

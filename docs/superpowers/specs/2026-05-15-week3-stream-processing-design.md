@@ -13,9 +13,10 @@ The goal is to prove that replay events can be ingested, transformed into sessio
 - Add `services/simulator` to read `data/simulation_raw/2019-Nov.csv.gz`, validate rows, rename raw `event_time` to `source_event_time`, attach `replay_time`, generate deterministic `event_id`, and publish bounded replay batches to a `raw_events` topic.
 - The simulator must publish events in `source_event_time` order within each `user_session`.
 - Redpanda messages must use `user_session` as the message key so same-session events land on the same partition.
-- Add `services/stream-processor` using Quix Streams to consume `raw_events`, deduplicate by `event_id`, route late events to `late_events`, update Redis session state, invalidate cached predictions for that session, and append accepted replay events to PostgreSQL.
+- Add `services/stream-processor` using Quix Streams to consume `raw_events`, deduplicate by `event_id`, route late events to `late_events` through a filtered StreamingDataFrame branch and `to_topic`, update Redis session state, invalidate cached predictions for that session, and append accepted replay events to PostgreSQL.
 - Keep the late-event policy explicit: late events are logged and routed away from the live session state path; they do not update Redis or the append-only processed replay log.
 - `late_events` is a separate Kafka topic. It stores the original normalized event payload plus `late_reason`.
+- Kafka output and checkpointing use Quix `PROCESSING_GUARANTEE=exactly-once` by default. This guarantee covers Kafka/checkpoint behavior, not external Redis or PostgreSQL side effects; those remain protected by Redis dedup keys and PostgreSQL `ON CONFLICT`.
 - Redpanda topics are created by compose/init automation, not implicit production defaults:
   - `raw_events`: 3 partitions, replication factor 1 for local dev.
   - `late_events`: 3 partitions, replication factor 1 for local dev.
