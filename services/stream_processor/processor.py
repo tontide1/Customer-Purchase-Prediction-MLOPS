@@ -59,6 +59,7 @@ def process_event(
                 key=event["user_session"],
                 value=late_event,
             )
+            redis_client.delete(dedup_key)
             return "late"
 
         replay_store.append(event)
