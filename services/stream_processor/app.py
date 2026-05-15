@@ -39,9 +39,28 @@ class StreamProcessorSettings:
         )
 
 
+def _check_connection(connection) -> None:
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT 1")
+
+
+def create_connection_pool(postgres_dsn: str):
+    from psycopg_pool import ConnectionPool
+
+    pool = ConnectionPool(
+        conninfo=postgres_dsn,
+        min_size=1,
+        max_size=1,
+        open=True,
+        check=_check_connection,
+        reconnect_timeout=30.0,
+    )
+    pool.wait()
+    return pool
+
+
 def build_app(settings: StreamProcessorSettings) -> Any:
     from quixstreams import Application
-    import psycopg
     import redis
 
     application = Application(
@@ -60,8 +79,8 @@ def build_app(settings: StreamProcessorSettings) -> Any:
         key_serializer="str",
     )
     redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
-    connection = psycopg.connect(settings.postgres_dsn)
-    replay_store = ReplayEventStore(connection)
+    connection_pool = create_connection_pool(settings.postgres_dsn)
+    replay_store = ReplayEventStore(connection_pool)
     late_producer = application.get_producer()
 
     sdf = application.dataframe(raw_topic)

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+
 import pytest
 
 from services.stream_processor.processor import process_event
@@ -55,6 +57,17 @@ class FakeReplayStore:
 
     def append(self, event):
         self.events.append(event)
+
+
+class FakeConnectionPool:
+    def __init__(self, connection):
+        self.connection_obj = connection
+        self.connection_calls = 0
+
+    @contextmanager
+    def connection(self):
+        self.connection_calls += 1
+        yield self.connection_obj
 
 
 def _event(**overrides):
@@ -261,7 +274,7 @@ def test_replay_event_store_rolls_back_when_execute_fails():
             self.commit_calls += 1
 
     connection = FailingConnection()
-    store = ReplayEventStore(connection)
+    store = ReplayEventStore(FakeConnectionPool(connection))
 
     with pytest.raises(RuntimeError, match="execute failed"):
         store.append(_event())
@@ -299,7 +312,7 @@ def test_replay_event_store_rolls_back_when_commit_fails():
             raise RuntimeError("commit failed")
 
     connection = FailingCommitConnection()
-    store = ReplayEventStore(connection)
+    store = ReplayEventStore(FakeConnectionPool(connection))
 
     with pytest.raises(RuntimeError, match="commit failed"):
         store.append(_event())
@@ -334,7 +347,8 @@ def test_replay_event_store_appends_with_conflict_do_nothing():
             self.commits += 1
 
     connection = FakeConnection()
-    store = ReplayEventStore(connection)
+    pool = FakeConnectionPool(connection)
+    store = ReplayEventStore(pool)
     event = _event()
 
     store.append(event)
@@ -342,3 +356,56 @@ def test_replay_event_store_appends_with_conflict_do_nothing():
     assert "ON CONFLICT (event_id) DO NOTHING" in connection.cursor_obj.executed[0][0]
     assert connection.cursor_obj.executed[0][1] == event
     assert connection.commits == 1
+
+
+def test_replay_event_store_checks_out_a_new_pool_connection_per_append():
+    class FakeCursor:
+        def __init__(self, marker):
+            self.marker = marker
+            self.executed = []
+
+        def execute(self, sql, params):
+            self.executed.append((sql, params))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeConnection:
+        def __init__(self, marker):
+            self.marker = marker
+            self.cursor_obj = FakeCursor(marker)
+            self.commits = 0
+
+        def cursor(self):
+            return self.cursor_obj
+
+        def rollback(self):
+            raise AssertionError("rollback should not be called")
+
+        def commit(self):
+            self.commits += 1
+
+    class CountingPool:
+        def __init__(self):
+            self.connection_calls = 0
+            self.connections = [FakeConnection("first"), FakeConnection("second")]
+
+        @contextmanager
+        def connection(self):
+            connection = self.connections[self.connection_calls]
+            self.connection_calls += 1
+            yield connection
+
+    pool = CountingPool()
+    store = ReplayEventStore(pool)
+    event = _event()
+
+    store.append(event)
+    store.append(event)
+
+    assert pool.connection_calls == 2
+    assert pool.connections[0].commits == 1
+    assert pool.connections[1].commits == 1

@@ -16,9 +16,17 @@ def _redis_text(value: Any) -> str:
 
 
 def _is_missing(value: Any) -> bool:
-    return value is None or value == "" or (
-        isinstance(value, float) and math.isnan(value)
-    )
+    if value is None:
+        return True
+    try:
+        if value == "":
+            return True
+    except Exception:
+        pass
+    try:
+        return math.isnan(value)
+    except (TypeError, ValueError):
+        return False
 
 
 def _state_value(state: dict, key: str, default: str) -> str:
