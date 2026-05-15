@@ -7,6 +7,8 @@ from typing import Any
 
 from services.stream_processor.state import apply_event_to_session_state
 
+STREAM_PROCESSOR_STATUS_FIELD = "_stream_processor_status"
+
 
 def _parse_iso_timestamp(value: Any) -> dt.datetime:
     if isinstance(value, bytes):
@@ -37,33 +39,28 @@ def _is_late(redis_client, event: dict[str, Any], *, late_threshold_seconds: int
 def process_event(
     redis_client,
     replay_store,
-    late_producer,
     event: dict[str, Any],
     *,
-    late_topic: str,
     ttl_seconds: int = 1800,
     late_threshold_seconds: int = 60,
 ) -> str:
     dedup_key = f"dedup:event:{event['event_id']}"
     if not redis_client.set(dedup_key, "1", nx=True, ex=ttl_seconds):
+        event[STREAM_PROCESSOR_STATUS_FIELD] = "duplicate"
         return "duplicate"
 
     try:
         if _is_late(redis_client, event, late_threshold_seconds=late_threshold_seconds):
-            late_event = dict(event)
-            late_event["late_reason"] = (
+            event["late_reason"] = (
                 f"older_than_last_event_time_by_more_than_{late_threshold_seconds}s"
             )
-            late_producer.produce(
-                topic=late_topic,
-                key=event["user_session"],
-                value=late_event,
-            )
+            event[STREAM_PROCESSOR_STATUS_FIELD] = "late"
             return "late"
 
         replay_store.append(event)
         # Persist the append first so a failed write does not leave Redis ahead of Postgres.
         apply_event_to_session_state(redis_client, event, ttl_seconds=ttl_seconds)
+        event[STREAM_PROCESSOR_STATUS_FIELD] = "accepted"
         return "accepted"
     except Exception:
         redis_client.delete(dedup_key)

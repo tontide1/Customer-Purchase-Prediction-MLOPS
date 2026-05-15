@@ -6,7 +6,7 @@ from contextlib import contextmanager
 
 import pytest
 
-from services.stream_processor.processor import process_event
+from services.stream_processor.processor import STREAM_PROCESSOR_STATUS_FIELD, process_event
 from services.stream_processor.db import ReplayEventStore
 
 
@@ -43,20 +43,12 @@ class FakeRedis:
         self.deleted.append(key)
 
 
-class FakeLateProducer:
-    def __init__(self):
-        self.messages = []
-
-    def produce(self, *, topic, key, value):
-        self.messages.append({"topic": topic, "key": key, "value": value})
-
-
 class FakeReplayStore:
     def __init__(self):
         self.events = []
 
     def append(self, event):
-        self.events.append(event)
+        self.events.append(dict(event))
 
 
 class FakeConnectionPool:
@@ -91,41 +83,37 @@ def _event(**overrides):
 
 def test_process_event_suppresses_duplicate_event_ids():
     redis = FakeRedis()
-    late = FakeLateProducer()
     store = FakeReplayStore()
+    accepted = _event()
+    duplicate = _event()
 
-    assert process_event(redis, store, late, _event(), late_topic="late_events") == "accepted"
-    assert process_event(redis, store, late, _event(), late_topic="late_events") == "duplicate"
+    assert process_event(redis, store, accepted) == "accepted"
+    assert process_event(redis, store, duplicate) == "duplicate"
 
     assert store.events == [_event()]
-    assert late.messages == []
+    assert accepted[STREAM_PROCESSOR_STATUS_FIELD] == "accepted"
+    assert duplicate[STREAM_PROCESSOR_STATUS_FIELD] == "duplicate"
+    assert "late_reason" not in duplicate
     assert redis.set_calls[0] == ("dedup:event:event-1", "1", True, 1800)
     assert redis.set_calls[1] == ("dedup:event:event-1", "1", True, 1800)
 
 
 def test_process_event_routes_late_event_and_skips_state_and_postgres():
     redis = FakeRedis()
-    late = FakeLateProducer()
     store = FakeReplayStore()
 
     accepted = _event(event_id="e1", source_event_time="2019-11-01T00:02:00+00:00")
     late_event = _event(event_id="e2", source_event_time="2019-11-01T00:00:30+00:00")
     redis.hashes["session:session-1"] = {"last_event_time": accepted["source_event_time"]}
 
-    assert process_event(redis, store, late, accepted, late_topic="late_events") == "accepted"
-    assert process_event(redis, store, late, late_event, late_topic="late_events") == "late"
+    assert process_event(redis, store, accepted) == "accepted"
+    assert process_event(redis, store, late_event) == "late"
 
-    assert store.events == [accepted]
-    assert late.messages == [
-        {
-            "topic": "late_events",
-            "key": "session-1",
-            "value": {
-                **late_event,
-                "late_reason": "older_than_last_event_time_by_more_than_60s",
-            },
-        }
+    assert store.events == [
+        _event(event_id="e1", source_event_time="2019-11-01T00:02:00+00:00")
     ]
+    assert late_event[STREAM_PROCESSOR_STATUS_FIELD] == "late"
+    assert late_event["late_reason"] == "older_than_last_event_time_by_more_than_60s"
     assert "session:session-1" in redis.hashes
     assert "session:session-1:products" in redis.sets
     assert redis.deleted == ["cache:predict:session:session-1"]
@@ -137,16 +125,16 @@ def test_process_event_cleans_up_dedup_key_and_leaves_state_unmutated_when_appen
             raise RuntimeError("append failed")
 
     redis = FakeRedis()
-    late = FakeLateProducer()
     store = FailingReplayStore()
+    event = _event()
 
     with pytest.raises(RuntimeError, match="append failed"):
-        process_event(redis, store, late, _event(), late_topic="late_events")
+        process_event(redis, store, event)
 
     assert "dedup:event:event-1" not in redis.values
     assert "dedup:event:event-1" in redis.deleted
     assert redis.hashes == {}
-    assert late.messages == []
+    assert STREAM_PROCESSOR_STATUS_FIELD not in event
 
 
 def test_process_event_cleans_up_dedup_key_when_pipeline_execute_fails():
@@ -179,18 +167,18 @@ def test_process_event_cleans_up_dedup_key_when_pipeline_execute_fails():
             return FailingPipeline()
 
     redis = PipelineRedis()
-    late = FakeLateProducer()
     store = FakeReplayStore()
+    event = _event()
 
     with pytest.raises(RuntimeError, match="pipeline failed"):
-        process_event(redis, store, late, _event(), late_topic="late_events")
+        process_event(redis, store, event)
 
     assert redis.pipeline_calls == [True]
     assert redis.hashes == {}
     assert redis.sets == {}
     assert "dedup:event:event-1" not in redis.values
     assert "dedup:event:event-1" in redis.deleted
-    assert late.messages == []
+    assert STREAM_PROCESSOR_STATUS_FIELD not in event
 
 
 def test_process_event_uses_pipeline_for_accepted_events():
@@ -230,10 +218,10 @@ def test_process_event_uses_pipeline_for_accepted_events():
             return self.pipeline_obj
 
     redis = PipelineRedis()
-    late = FakeLateProducer()
     store = FakeReplayStore()
+    event = _event()
 
-    assert process_event(redis, store, late, _event(), late_topic="late_events") == "accepted"
+    assert process_event(redis, store, event) == "accepted"
 
     assert redis.pipeline_calls == [True]
     assert redis.pipeline_obj.execute_called is True
@@ -245,7 +233,7 @@ def test_process_event_uses_pipeline_for_accepted_events():
     assert ("expire", "session:session-1", 1800) in redis.pipeline_obj.commands
     assert ("delete", "cache:predict:session:session-1") in redis.pipeline_obj.commands
     assert store.events == [_event()]
-    assert late.messages == []
+    assert event[STREAM_PROCESSOR_STATUS_FIELD] == "accepted"
 
 
 def test_replay_event_store_rolls_back_when_execute_fails():
