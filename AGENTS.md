@@ -32,6 +32,15 @@
   - `services/simulator/replay.py` handles bounded replay normalization and Quix-safe publish serialization
   - `services/simulator/app.py`, `services/simulator/Dockerfile`, and `services/simulator/requirements.txt` provide the replay CLI/container entrypoint
   - `services/tests/` includes coverage for replay ordering, publish keys, and serialized topic handling
+- **Week 3 stream processor** is implemented in branch/worktree `week3-02`:
+  - `week3-02` includes the Week 3 simulator files plus the stream processor increment.
+  - `services/stream_processor/state.py` maintains Redis session hashes/sets, TTLs, and prediction-cache invalidation.
+  - `services/stream_processor/processor.py` handles duplicate suppression, late-event policy, PostgreSQL append, and status marking.
+  - `services/stream_processor/app.py` wires Quix Streams consumption from `raw_events`, routes late events through a filtered StreamingDataFrame branch to `late_events`, and defaults `PROCESSING_GUARANTEE=exactly-once`.
+  - `services/stream_processor/db.py` appends accepted replay events to PostgreSQL table `replay_events` with `ON CONFLICT (event_id) DO NOTHING`.
+  - `infra/postgres/init.sql` creates the `replay_events` append-log table.
+  - `services/stream_processor/requirements.txt` adds service runtime deps not currently listed in base project deps: `redis`, `psycopg`, and `psycopg_pool`.
+  - Current root `docker-compose.yml` still only provisions MinIO + MLflow; Redpanda, Redis, PostgreSQL, simulator, and stream processor compose wiring is planned but not yet executable from root compose.
 - Executable data & training foundation exists in:
   - `training/src/config.py`, `training/src/bronze.py`, `training/src/silver.py`
   - `training/src/features.py`, `training/src/session_split.py`, `training/src/gold.py`
@@ -55,6 +64,9 @@
 
 - Preferred Python env: `conda activate MLOPS` (expected Python 3.11.x in this env).
 - Install package/dev tooling with `python -m pip install -e ".[dev]"`.
+- For Week 3 simulator/stream-processor worktrees, also install service deps:
+  - `python -m pip install -r services/simulator/requirements.txt`
+  - `python -m pip install -r services/stream_processor/requirements.txt`
 - If `python` is unavailable outside conda, use `python3` for scripts.
 - Start local object storage: `docker compose up -d` (MinIO + MLflow).
 - Quick health check: `docker compose ps` (MinIO ports `9000` API, `9001` console; MLflow port `5000`).
@@ -67,10 +79,15 @@
 - Sprint 2b pipeline (branch `feature/sprint2b`):
   - `python -m training.src.train --train data/gold/train.parquet --val data/gold/val.parquet --test data/gold/test.parquet --session-split-map data/gold/session_split_map.parquet --smoke-mode`
   - Without `--smoke-mode`: full Optuna search (50 trials, ~1hr)
+- Week 3 service commands (branch/worktree `week3-02`; require Redpanda/Redis/PostgreSQL for runtime smoke):
+  - Simulator help/import smoke: `python -m services.simulator.app --help`
+  - Bounded replay publish: `python -m services.simulator.app --input data/simulation_raw/2019-Nov.csv.gz --limit 100 --broker localhost:9092 --topic raw_events`
+  - Stream processor runtime: `KAFKA_BROKER=localhost:9092 REDIS_URL=redis://localhost:6379/0 POSTGRES_DSN=postgresql://mlops:mlops@localhost:5432/mlops python -m services.stream_processor.app`
 - Use module-mode commands (`python -m training.src...`) rather than direct script paths. The old `sys.path.insert(...)` import hacks were removed from `training/src` and tests.
 - Common verification commands:
   - `ruff check .`
   - `pytest training/tests -q`
+  - `pytest services/tests/test_event_id.py services/tests/test_simulator_replay.py services/tests/test_simulator_publish.py services/tests/test_stream_state.py services/tests/test_stream_processor.py services/tests/test_stream_processor_app.py -q`
   - `dvc dag`
   - `PRE_COMMIT_HOME=/tmp/pre-commit-cache pre-commit run --all-files` when the default home cache is not writable.
 
@@ -88,10 +105,16 @@
 - LightGBM v4.x: `is_unbalance` conflicts with `scale_pos_weight` — use one or the other, not both.
 - Categorical-aware training keeps `category_id`, `category_code`, and `brand` as first-class inputs; do not coerce the full frame to `float32` before model-specific preprocessing.
 - SHAP binary classification can return list or 3D array outputs across CatBoost/LightGBM/XGBoost; extract class 1 via `shap_values[:, :, 1]` when the explainer returns a 3D array.
+- Week 3 simulator must sort bounded replay events by `user_session` and raw `event_time` before publishing; do not use unsorted CSV order as proof of late-event routing.
+- Week 3 replay events must keep raw `event_time` out of the online payload and use `source_event_time` plus `replay_time`.
+- Week 3 stream processor stores Redis state in `session:{user_session}` plus `session:{user_session}:products` and `session:{user_session}:categories`; every session key must receive TTL.
+- Week 3 Redis null handling is intentional: numeric `price` null becomes `latest_price="0"` to match training numeric `fillna(0)`, while nullable categorical text fields use `""` and are converted to the serving bundle missing token later.
+- Week 3 late events are marked with internal `_stream_processor_status="late"`, enriched with `late_reason`, routed to `late_events`, and must not update Redis or PostgreSQL `replay_events`.
+- Quix `PROCESSING_GUARANTEE=exactly-once` covers Kafka output/checkpointing only; Redis/PostgreSQL remain external side effects protected by Redis dedup keys and PostgreSQL conflict handling.
 
 ## Contracts to preserve when touching architecture/docs
 
-- Canonical `event_id`: `hash(f"{user_session}|{source_event_time}|{event_type}|{product_id}|{user_id}")`.
+- Canonical Week 3 `event_id`: SHA-256 hex digest of `f"{user_session}|{source_event_time}|{event_type}|{product_id}|{user_id}"`, implemented by `shared.event_id.compute_event_id(...)`.
 - Validation gate is fail-closed except first deployment; manual override requires `override_by`, `override_reason`, `override_time`.
 - `/predict` may fallback; `/explain` must return `503` when explainer is unavailable.
 - Fallback predictions must not be cached and must be excluded from model-quality metrics.
