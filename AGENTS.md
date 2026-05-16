@@ -40,7 +40,13 @@
   - `services/stream_processor/db.py` appends accepted replay events to PostgreSQL table `replay_events` with `ON CONFLICT (event_id) DO NOTHING`.
   - `infra/postgres/init.sql` creates the `replay_events` append-log table.
   - `services/stream_processor/requirements.txt` adds service runtime deps not currently listed in base project deps: `redis`, `psycopg`, and `psycopg_pool`.
-  - Current root `docker-compose.yml` still only provisions MinIO + MLflow; Redpanda, Redis, PostgreSQL, simulator, and stream processor compose wiring is planned but not yet executable from root compose.
+- **Week 3 compose infrastructure** is implemented in branch `week3-04` / PR #13:
+  - `docker-compose.yml` extended with Redpanda (`redpanda`, `redpanda-init`), Redis, PostgreSQL, simulator, stream-processor, and prediction-api services.
+  - `infra/redpanda/init-topics.sh` explicitly creates `raw_events` and `late_events` topics with 3 partitions / 1 replica via `rpk`.
+  - `.env.example` extended with Week 3 runtime settings (Kafka broker, Redis URL, PostgreSQL DSN, API key, MLflow serving bundle URI).
+  - `scripts/week3_compose_smoke.py` provides a local smoke helper: builds CI fixture, spins up compose stack, runs bounded replay, injects a late event, verifies late-event routing, and calls the prediction API. Requires a real `MLFLOW_SERVING_BUNDLE_URI` (rejects the placeholder `runs:/replace-with-week3-smoke-run`).
+  - `services/tests/test_compose_contract.py` and `services/tests/test_week3_smoke_script.py` provide static contract tests for compose and smoke script.
+  - CI updated to install service deps, run all tests with coverage, and validate Docker Compose config.
 - **Week 3 serving/prediction API** is implemented in branch/worktree `week3-03`:
   - `services/stream_processor/state.py` writes the pre-event `serving_*` snapshot into Redis before incrementing the canonical post-event counters/sets.
   - `services/prediction_api/features.py` and `services/prediction_api/app.py` read only `serving_*` fields, return the existing `redis_miss` fallback on incomplete state, use constant-time API key validation, and fail fast when `MLFLOW_SERVING_BUNDLE_URI` is missing.
@@ -73,8 +79,10 @@
 - For Week 3 simulator/stream-processor worktrees, also install service deps:
   - `python -m pip install -r services/simulator/requirements.txt`
   - `python -m pip install -r services/stream_processor/requirements.txt`
+- Additional dev dependencies added in `week3-04`: `PyYAML>=6.0.0` (compose contract tests), `requests>=2.31.0` (smoke script).
 - If `python` is unavailable outside conda, use `python3` for scripts.
 - Start local object storage: `docker compose up -d` (MinIO + MLflow).
+- Start full Week 3 online stack: `docker compose up -d --build redpanda redpanda-init redis postgres minio minio-init mlflow stream-processor prediction-api`
 - Quick health check: `docker compose ps` (MinIO ports `9000` API, `9001` console; MLflow port `5000`).
 - Sprint 2a pipeline commands (> main branch; Sprint 2b adds train stage):
   - `python -m training.src.bronze --input data/train_raw --output data/bronze/events.parquet`
@@ -93,9 +101,12 @@
 - Common verification commands:
   - `ruff check .`
   - `pytest training/tests -q`
-  - `pytest services/tests/test_event_id.py services/tests/test_simulator_replay.py services/tests/test_simulator_publish.py services/tests/test_stream_state.py services/tests/test_stream_processor.py services/tests/test_stream_processor_app.py -q`
+  - `pytest services/tests/test_event_id.py services/tests/test_simulator_replay.py services/tests/test_simulator_publish.py services/tests/test_stream_state.py services/tests/test_stream_processor.py services/tests/test_stream_processor_app.py services/tests/test_compose_contract.py services/tests/test_week3_smoke_script.py -q`
+  - `docker compose config` (validate compose graph)
   - `dvc dag`
   - `PRE_COMMIT_HOME=/tmp/pre-commit-cache pre-commit run --all-files` when the default home cache is not writable.
+- Week 3 smoke helper (requires Docker + real `MLFLOW_SERVING_BUNDLE_URI`):
+  - `python scripts/week3_compose_smoke.py`
 
 ## Data pipeline gotchas that cause real failures
 

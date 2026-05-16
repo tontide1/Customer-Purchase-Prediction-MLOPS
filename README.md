@@ -129,11 +129,56 @@ python -m training.src.train \
   --session-split-map data/gold/session_split_map.parquet
 ```
 
+## Week 3 Online Replay Slice
+
+Week 3 adds a local online path on top of the existing offline pipeline:
+
+- `services/simulator` reads `data/simulation_raw/2019-Nov.csv.gz`, normalizes raw rows, and publishes bounded replay events to `raw_events`.
+- `services/stream_processor` consumes `raw_events`, suppresses duplicate `event_id` values with Redis TTL keys, routes late events to `late_events`, updates Redis session state, invalidates prediction cache keys, and appends accepted replay events to PostgreSQL.
+- `services/prediction_api` serves `GET /health` and authenticated `GET /api/v1/predict/{user_session}` using the MLflow serving bundle logged by a smoke training run.
+
+Run the local online stack:
+
+```bash
+docker compose up -d --build redpanda redpanda-init redis postgres minio minio-init mlflow stream-processor prediction-api
+```
+
+Create a serving bundle with a smoke training run:
+
+```bash
+python -m training.src.train \
+  --train data/gold/train.parquet \
+  --val data/gold/val.parquet \
+  --test data/gold/test.parquet \
+  --session-split-map data/gold/session_split_map.parquet \
+  --smoke-mode \
+  --device cpu
+```
+
+Set `MLFLOW_SERVING_BUNDLE_URI` to the winner `{model}_test_evaluation` run URI. The placeholder `runs:/replace-with-week3-smoke-run` is only a compose default and must fail full smoke. Then replay a bounded batch:
+
+```bash
+docker compose run --rm simulator python -m services.simulator.app --limit 1000
+```
+
+Call the API:
+
+```bash
+curl -H "X-API-Key: ${API_KEY:-local-dev-api-key}" \
+  http://localhost:8080/api/v1/predict/<user_session>
+```
+
+Run the Week 3 smoke helper:
+
+```bash
+python scripts/week3_compose_smoke.py
+```
+
 Run checks:
 
 ```bash
 ruff check .
-pytest training/tests -q
+pytest training/tests services/tests -q
 dvc dag
 ```
 
