@@ -24,13 +24,9 @@ jobs:
           cache: pip
 
       - name: Install project
+        # dev extra includes training, shared, and services/* dependencies.
+        # Install only via pyproject.toml to avoid dependency skew with requirements.txt.
         run: python -m pip install -e ".[dev]"
-
-      - name: Install Week 3 service dependencies
-        run: |
-          python -m pip install -r services/simulator/requirements.txt
-          python -m pip install -r services/stream_processor/requirements.txt
-          python -m pip install -r services/prediction_api/requirements.txt
 
       - name: Run pre-commit
         env:
