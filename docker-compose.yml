@@ -64,9 +64,128 @@ services:
     networks:
       - mlops_net
 
+  redpanda:
+    image: redpandadata/redpanda:24.1.5
+    container_name: redpanda
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - 512M
+      - --reserve-memory
+      - 0M
+      - --node-id
+      - "0"
+      - --check=false
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:9092,OUTSIDE://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - PLAINTEXT://redpanda:9092,OUTSIDE://localhost:19092
+    ports:
+      - "19092:19092"
+    networks:
+      - mlops_net
+
+  redpanda-init:
+    image: redpandadata/redpanda:latest
+    container_name: redpanda-init
+    depends_on:
+      - redpanda
+    command: sh /infra/redpanda/init-topics.sh
+    environment:
+      KAFKA_BROKER: redpanda:9092
+    volumes:
+      - ./infra/redpanda/init-topics.sh:/infra/redpanda/init-topics.sh:ro
+    restart: "no"
+    networks:
+      - mlops_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    networks:
+      - mlops_net
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mlops}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mlops}
+      POSTGRES_DB: ${POSTGRES_DB:-mlops}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - mlops_net
+
+  simulator:
+    build:
+      context: .
+      dockerfile: services/simulator/Dockerfile
+    image: iuh-final-simulator:local
+    profiles: ["week3"]
+    depends_on:
+      - redpanda-init
+    environment:
+      KAFKA_BROKER: redpanda:9092
+      RAW_EVENTS_TOPIC: raw_events
+      SIMULATION_RAW_DATA_PATH: /app/data/simulation_raw/2019-Nov.csv.gz
+      REPLAY_LIMIT: ${REPLAY_LIMIT:-1000}
+    volumes:
+      - ./data:/app/data:ro
+    networks:
+      - mlops_net
+
+  stream-processor:
+    build:
+      context: .
+      dockerfile: services/stream_processor/Dockerfile
+    image: iuh-final-stream-processor:local
+    depends_on:
+      - redpanda-init
+      - redis
+      - postgres
+    environment:
+      KAFKA_BROKER: redpanda:9092
+      RAW_EVENTS_TOPIC: raw_events
+      LATE_EVENTS_TOPIC: late_events
+      REDIS_URL: redis://redis:6379/0
+      POSTGRES_DSN: postgresql://mlops:mlops@postgres:5432/mlops
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-1800}
+      LATE_EVENT_THRESHOLD_SECONDS: ${LATE_EVENT_THRESHOLD_SECONDS:-60}
+    networks:
+      - mlops_net
+
+  prediction-api:
+    build:
+      context: .
+      dockerfile: services/prediction_api/Dockerfile
+    image: iuh-final-prediction-api:local
+    depends_on:
+      - redis
+      - mlflow
+    environment:
+      API_KEY: ${API_KEY:-local-dev-api-key}
+      REDIS_URL: redis://redis:6379/0
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MLFLOW_SERVING_BUNDLE_URI: ${MLFLOW_SERVING_BUNDLE_URI:-runs:/replace-with-week3-smoke-run}
+    ports:
+      - "8080:8080"
+    networks:
+      - mlops_net
+
 volumes:
   minio_data:
   mlflow_backend:
+  postgres_data:
 
 networks:
   mlops_net:
