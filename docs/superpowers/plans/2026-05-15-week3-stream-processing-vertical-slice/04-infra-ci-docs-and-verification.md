@@ -147,10 +147,11 @@ In `docker-compose.yml`, keep existing `minio`, `minio-init`, and `mlflow` uncha
       - mlops_net
 
   redpanda-init:
-    image: redpandadata/redpanda:latest
+    image: docker.redpanda.com/redpandadata/redpanda:v26.1.6
     container_name: redpanda-init
     depends_on:
       - redpanda
+    entrypoint: ["/bin/sh", "-c"]
     command: sh /infra/redpanda/init-topics.sh
     environment:
       KAFKA_BROKER: redpanda:9092
@@ -235,7 +236,7 @@ In `docker-compose.yml`, keep existing `minio`, `minio-init`, and `mlflow` uncha
       MLFLOW_TRACKING_URI: http://mlflow:5000
       MLFLOW_SERVING_BUNDLE_URI: ${MLFLOW_SERVING_BUNDLE_URI:-runs:/replace-with-week3-smoke-run}
     ports:
-      - "8080:8080"
+      - "8080:8000"
     networks:
       - mlops_net
 ```

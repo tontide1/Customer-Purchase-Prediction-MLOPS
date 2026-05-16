@@ -45,7 +45,7 @@ services:
       dockerfile: infra/mlflow/Dockerfile
     image: iuh-final-mlflow:local
     container_name: mlflow
-    command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:////mlflow/mlflow.db --serve-artifacts --default-artifact-root mlflow-artifacts:/ --artifacts-destination s3://${MINIO_BUCKET:-mlops-artifacts}/mlflow
+    command: mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri sqlite:////mlflow/mlflow.db --serve-artifacts --default-artifact-root mlflow-artifacts:/ --artifacts-destination s3://${MINIO_BUCKET:-mlops-artifacts}/mlflow --allowed-hosts mlflow,mlflow:5000,localhost,127.0.0.1
     depends_on:
       minio:
         condition: service_started
@@ -65,7 +65,7 @@ services:
       - mlops_net
 
   redpanda:
-    image: redpandadata/redpanda:24.1.5
+    image: docker.redpanda.com/redpandadata/redpanda:v26.1.6
     container_name: redpanda
     command:
       - redpanda
@@ -90,10 +90,11 @@ services:
       - mlops_net
 
   redpanda-init:
-    image: redpandadata/redpanda:latest
+    image: docker.redpanda.com/redpandadata/redpanda:v26.1.6
     container_name: redpanda-init
     depends_on:
       - redpanda
+    entrypoint: ["/bin/sh", "-c"]
     command: sh /infra/redpanda/init-topics.sh
     environment:
       KAFKA_BROKER: redpanda:9092
@@ -178,7 +179,7 @@ services:
       MLFLOW_TRACKING_URI: http://mlflow:5000
       MLFLOW_SERVING_BUNDLE_URI: ${MLFLOW_SERVING_BUNDLE_URI:-runs:/replace-with-week3-smoke-run}
     ports:
-      - "8080:8080"
+      - "8080:8000"
     networks:
       - mlops_net
 

@@ -50,10 +50,13 @@
   - `infra/postgres/init.sql` creates the `replay_events` append-log table.
   - `services/stream_processor/requirements.txt` adds service runtime deps not currently listed in base project deps: `redis`, `psycopg`, and `psycopg_pool`.
 - **Week 3 compose infrastructure** is implemented in branch `week3-04` / PR #13:
-  - `docker-compose.yml` extended with Redpanda (`redpanda`, `redpanda-init`), Redis, PostgreSQL, simulator, stream-processor, and prediction-api services.
+  - `docker-compose.yml` extends Redpanda (`redpanda`, `redpanda-init`), Redis, PostgreSQL, simulator, stream-processor, and prediction-api services.
+  - `prediction-api` is published on host port `8080` and maps to container port `8000`; do not revert this to `8080:8080`.
+  - `mlflow` must allow internal Docker host headers with `--allowed-hosts mlflow,mlflow:5000,localhost,127.0.0.1`; otherwise the prediction API gets `403 Invalid Host header` when it loads `runs:/...` bundles.
+  - `redpanda-init` must override the image entrypoint to `["/bin/sh", "-c"]`; otherwise `command: sh /infra/redpanda/init-topics.sh` is interpreted by `rpk` and fails as `unknown command "sh"`.
   - `infra/redpanda/init-topics.sh` explicitly creates `raw_events` and `late_events` topics with 3 partitions / 1 replica via `rpk`.
   - `.env.example` extended with Week 3 runtime settings (Kafka broker, Redis URL, PostgreSQL DSN, API key, MLflow serving bundle URI).
-  - `scripts/week3_compose_smoke.py` provides a local smoke helper: builds CI fixture, spins up compose stack, runs bounded replay, injects a late event, verifies late-event routing, and calls the prediction API. Requires a real `MLFLOW_SERVING_BUNDLE_URI` (rejects the placeholder `runs:/replace-with-week3-smoke-run`).
+  - `scripts/week3_compose_smoke.py` provides a local smoke helper: builds CI fixture, spins up compose stack, runs bounded replay, injects a late event, verifies late-event routing, and calls the prediction API. It requires a real `MLFLOW_SERVING_BUNDLE_URI` and uses Python-side `timeout=10` for the `late_events` consume check.
   - `services/tests/test_compose_contract.py` and `services/tests/test_week3_smoke_script.py` provide static contract tests for compose and smoke script.
   - CI updated to install service deps, run all tests with coverage, and validate Docker Compose config.
 - **Week 3 serving/prediction API** is implemented in branch/worktree `week3-03`:
@@ -106,6 +109,9 @@
   - Simulator help/import smoke: `python -m services.simulator.app --help`
   - Bounded replay publish: `python -m services.simulator.app --input data/simulation_raw/2019-Nov.csv.gz --limit 100 --broker localhost:9092 --topic raw_events`
   - Stream processor runtime: `KAFKA_BROKER=localhost:9092 REDIS_URL=redis://localhost:6379/0 POSTGRES_DSN=postgresql://mlops:mlops@localhost:5432/mlops python -m services.stream_processor.app`
+  - Prediction API health check: `curl http://localhost:8080/health`
+  - Prediction API predict check: `curl -H "X-API-Key: ${API_KEY:-local-dev-api-key}" http://localhost:8080/api/v1/predict/<user_session>`
+  - Redpanda topic re-init: `docker compose run --rm redpanda-init`
 - Use module-mode commands (`python -m training.src...`) rather than direct script paths. The old `sys.path.insert(...)` import hacks were removed from `training/src` and tests.
 - Common verification commands:
   - `ruff check .`

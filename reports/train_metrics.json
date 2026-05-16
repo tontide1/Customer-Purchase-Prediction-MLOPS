@@ -1,9 +1,9 @@
 {
-  "test_average_precision": 0.20645675092984994,
-  "test_pr_auc": 0.20652405202490767,
+  "test_average_precision": 0.206456773214743,
+  "test_pr_auc": 0.20652407431773,
   "validation_gate_passed": true,
   "winner_name": "catboost",
-  "winner_validation_average_precision": 0.16482999277176463,
-  "winner_validation_pr_auc": 0.16487644831698878,
-  "winner_validation_threshold": 0.1325638600590577
+  "winner_validation_average_precision": 0.16482994224545425,
+  "winner_validation_pr_auc": 0.16487639764946976,
+  "winner_validation_threshold": 0.1325636861043019
 }

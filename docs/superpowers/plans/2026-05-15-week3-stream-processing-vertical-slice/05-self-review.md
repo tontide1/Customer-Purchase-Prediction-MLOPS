@@ -19,7 +19,7 @@
 
 ## Original Plan Self-Review
 
-- Spec coverage: Tasks 1-3 cover deterministic IDs, raw `event_time` rename, simulator validation, bounded replay, publish keying, and per-session ordering. Tasks 4-6 cover Redis state, TTLs, cache invalidation, duplicate suppression, late routing, PostgreSQL append, and Quix Streams runtime. Tasks 7-9 cover MLflow serving bundle, feature assembly, authentication, API response shape, and fallbacks. Tasks 10-12 cover Redpanda topics, Redis/PostgreSQL/API compose services, and CI checks. Task 13 covers README and blueprint sync.
+- Spec coverage: Tasks 1-3 cover deterministic IDs, raw `event_time` rename, simulator validation, bounded replay, publish keying, and per-session ordering. Tasks 4-6 cover Redis state, TTLs, cache invalidation, duplicate suppression, late routing, PostgreSQL append, and Quix Streams runtime. Tasks 7-9 cover MLflow serving bundle, feature assembly, authentication, API response shape, and fallbacks. Tasks 10-12 cover Redpanda topics, Redis/PostgreSQL/API compose services, and CI checks. Task 13 covers README and blueprint sync. Task 14 covers the final verification sweep across services, training, lint, compose config, and DVC graph.
 - Placeholder scan: The plan contains concrete file paths, code snippets, commands, and expected outputs. There are no deferred implementation markers.
 - Type consistency: The same event keys are used across simulator, processor, Redis state, PostgreSQL append, and API feature assembly: `event_id`, `user_session`, `source_event_time`, `replay_time`, `event_type`, `product_id`, `user_id`, `category_id`, `category_code`, `brand`, `price`, and `source`.
 - Categorical parity check: Task 8 must keep numeric columns numeric and rebuild categorical columns as `pd.Categorical` with `categories=list(category_maps[column].keys())`, matching `training/src/categorical_features.py`; integer category IDs are not the API feature contract.
@@ -27,3 +27,9 @@
 - Model-backed smoke check: Task 11 full compose smoke must fail unless `MLFLOW_SERVING_BUNDLE_URI` points at a real smoke-training serving bundle and `/predict` returns `prediction_mode="model"` with `fallback_reason=null`.
 - Late-event check: Integration smoke must inject a late event after normal replay state exists. It must not depend on unsorted simulator CSV input, because simulator replay is sorted per session.
 - Topic-init check: Task 10 Redpanda init must wait for broker readiness, create `raw_events` and `late_events`, and verify both topics exist instead of silently ignoring topic-creation failures.
+
+## Verification Result
+
+- The split plan coverage is intact after the live implementation pass.
+- The final verification gates passed in the current checkout: `pytest services/tests -q`, `pytest training/tests -q`, `ruff check .`, `docker compose config`, and `dvc dag`.
+- The only leftover warnings are deprecation and SHAP notices, not plan gaps.

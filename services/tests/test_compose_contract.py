@@ -23,6 +23,7 @@ def test_compose_declares_week3_services_and_topics():
         assert name in services
 
     assert "infra/redpanda/init-topics.sh" in services["redpanda-init"]["command"]
+    assert services["redpanda-init"]["entrypoint"] == ["/bin/sh", "-c"]
 
     init_script = Path("infra/redpanda/init-topics.sh").read_text(encoding="utf-8")
     assert "raw_events" in init_script
@@ -31,6 +32,9 @@ def test_compose_declares_week3_services_and_topics():
     assert "--replicas 1" in init_script
     assert "rpk cluster info" in init_script
     assert "rpk topic list" in init_script
+    assert "8080:8000" in services["prediction-api"]["ports"]
+    assert "--allowed-hosts" in services["mlflow"]["command"]
+    assert "mlflow,mlflow:5000,localhost,127.0.0.1" in services["mlflow"]["command"]
 
 
 def test_env_example_contains_week3_runtime_settings():

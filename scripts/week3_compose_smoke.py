@@ -138,12 +138,11 @@ def verify_late_event_routed() -> None:
             "redpanda:9092",
             "--num",
             "1",
-            "--timeout",
-            "10s",
         ],
         check=True,
         capture_output=True,
         text=True,
+        timeout=10,
     )
     if "ci-late-event-1" not in result.stdout:
         raise AssertionError(result.stdout)

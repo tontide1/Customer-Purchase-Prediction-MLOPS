@@ -91,14 +91,18 @@ docker volume rm iuh_final_mlflow_backend
 docker compose up -d --build
 ```
 
-Run the full pipeline, which executes Week 1 data preparation and Week 2
+Run the full offline pipeline, which executes Week 1 data preparation and Week 2
 training:
 
 ```bash
 dvc repro
 ```
 
-If you want to run only Week 1 step by step, use the direct module commands:
+## Week-by-Week
+
+### Week 1 Start And Test
+
+Use the direct module commands to run the Week 1 data pipeline step by step:
 
 ```bash
 python -m training.src.bronze \
@@ -119,6 +123,16 @@ python -m training.src.gold \
   --output data/gold
 ```
 
+Run the Week 1/2 offline tests and graph checks:
+
+```bash
+pytest training/tests -q
+ruff check .
+dvc dag
+```
+
+### Week 2 Start And Test
+
 If you want to run only Week 2 after Week 1 has produced the gold files, use:
 
 ```bash
@@ -127,6 +141,12 @@ python -m training.src.train \
   --val data/gold/val.parquet \
   --test data/gold/test.parquet \
   --session-split-map data/gold/session_split_map.parquet
+```
+
+Run the Week 2 training tests:
+
+```bash
+pytest training/tests -q
 ```
 
 ## Week 3 Online Replay Slice
@@ -161,6 +181,18 @@ Set `MLFLOW_SERVING_BUNDLE_URI` to the winner `{model}_test_evaluation` run URI.
 docker compose run --rm simulator python -m services.simulator.app --limit 1000
 ```
 
+Re-initialize Redpanda topics if needed:
+
+```bash
+docker compose run --rm redpanda-init
+```
+
+Check the API health endpoint on the published host port:
+
+```bash
+curl http://localhost:8080/health
+```
+
 Call the API:
 
 ```bash
@@ -174,11 +206,12 @@ Run the Week 3 smoke helper:
 python scripts/week3_compose_smoke.py
 ```
 
-Run checks:
+Run the Week 3 service tests and the combined repository checks:
 
 ```bash
-ruff check .
+pytest services/tests -q
 pytest training/tests services/tests -q
+ruff check .
 dvc dag
 ```
 
@@ -208,6 +241,15 @@ PRE_COMMIT_HOME=/tmp/pre-commit-cache pre-commit run --all-files
 - Week 3 stream processor and serving work lives in branch/worktree
   `week3-03`: the Redis-backed pre-event serving snapshot, the prediction API,
   and the MLflow serving bundle logging guard are implemented there.
+- Week 3 infra/CI/docs work lives in `week3-04`: compose wiring, topic init,
+  smoke helper, CI checks, and the review self-check artifact are implemented.
+  The live compose contract publishes `prediction-api` on `localhost:8080`,
+  maps it to container port `8000`, and requires MLflow to allow the internal
+  Docker host header `mlflow:5000`.
+- The Week 3 compose smoke path has been verified end-to-end in this checkout:
+  `late_events` routing works, `prediction-api` returns `prediction_mode="model"`
+  for the smoke session, and the serving bundle loads from
+  `runs:/0b983129152b4a10a44e5402edd7f1e1`.
 - `docs/BLUEPRINT/*.md` and `BLUEPRINT.md` are target-state design documents;
   prefer executable files such as `dvc.yaml` and `training/src/*.py` when there
   is a conflict.
