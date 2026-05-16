@@ -17,6 +17,7 @@ Late-event behavior is tested here at the processor boundary with explicit event
 ### Task 4: Redis Session State Feature Semantics
 
 **Files:**
+
 - Create: `services/stream_processor/__init__.py`
 - Create: `services/stream_processor/state.py`
 - Test: `services/tests/test_stream_state.py`
@@ -250,6 +251,7 @@ git commit -m "feat: maintain redis session state"
 ### Task 5: Stream Processor Duplicate Suppression, Late Routing, And PostgreSQL Append
 
 **Files:**
+
 - Create: `services/stream_processor/db.py`
 - Create: `services/stream_processor/processor.py`
 - Create: `infra/postgres/init.sql`
@@ -427,9 +429,12 @@ def process_event(
         event["_stream_processor_status"] = "late"
         return "late"
 
-    apply_event_to_session_state(redis_client, event, ttl_seconds=ttl_seconds)
-    replay_store.append(event)
-    event["_stream_processor_status"] = "accepted"
+    try:
+        replay_store.append(event)
+        apply_event_to_session_state(redis_client, event, ttl_seconds=ttl_seconds)
+    except Exception:
+        redis_client.delete(dedup_key)
+        raise event["_stream_processor_status"] = "accepted"
     return "accepted"
 ```
 
@@ -504,6 +509,7 @@ git commit -m "feat: process replay stream events"
 ### Task 6: Stream Processor Quix Entrypoint
 
 **Files:**
+
 - Create: `services/stream_processor/app.py`
 - Create: `services/stream_processor/requirements.txt`
 - Create: `services/stream_processor/Dockerfile`

@@ -6,7 +6,10 @@ from contextlib import contextmanager
 
 import pytest
 
-from services.stream_processor.processor import STREAM_PROCESSOR_STATUS_FIELD, process_event
+from services.stream_processor.processor import (
+    STREAM_PROCESSOR_STATUS_FIELD,
+    process_event,
+)
 from services.stream_processor.db import ReplayEventStore
 
 
@@ -104,7 +107,9 @@ def test_process_event_routes_late_event_and_skips_state_and_postgres():
 
     accepted = _event(event_id="e1", source_event_time="2019-11-01T00:02:00+00:00")
     late_event = _event(event_id="e2", source_event_time="2019-11-01T00:00:30+00:00")
-    redis.hashes["session:session-1"] = {"last_event_time": accepted["source_event_time"]}
+    redis.hashes["session:session-1"] = {
+        "last_event_time": accepted["source_event_time"]
+    }
 
     assert process_event(redis, store, accepted) == "accepted"
     assert process_event(redis, store, late_event) == "late"
@@ -226,10 +231,16 @@ def test_process_event_uses_pipeline_for_accepted_events():
     assert redis.pipeline_calls == [True]
     assert redis.pipeline_obj.execute_called is True
     assert ("hset", "session:session-1", redis.pipeline_obj.commands[0][2]) in [
-        (cmd[0], cmd[1], cmd[2]) for cmd in redis.pipeline_obj.commands if cmd[0] == "hset"
+        (cmd[0], cmd[1], cmd[2])
+        for cmd in redis.pipeline_obj.commands
+        if cmd[0] == "hset"
     ]
     assert ("sadd", "session:session-1:products", "100") in redis.pipeline_obj.commands
-    assert ("sadd", "session:session-1:categories", "cat-id") in redis.pipeline_obj.commands
+    assert (
+        "sadd",
+        "session:session-1:categories",
+        "cat-id",
+    ) in redis.pipeline_obj.commands
     assert ("expire", "session:session-1", 1800) in redis.pipeline_obj.commands
     assert ("delete", "cache:predict:session:session-1") in redis.pipeline_obj.commands
     assert store.events == [_event()]

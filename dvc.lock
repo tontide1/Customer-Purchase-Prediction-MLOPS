@@ -1,7 +1,7 @@
 schema: '2.0'
 stages:
   bronze:
-    cmd: python -m training.src.bronze --input data/train_raw --output 
+    cmd: python -m training.src.bronze --input data/train_raw --output
       data/bronze/events.parquet
     deps:
     - path: data/train_raw
@@ -31,7 +31,7 @@ stages:
       md5: aba52ef90f4f55a7ae68f8d62b242c0a
       size: 34188441
   silver:
-    cmd: python -m training.src.silver --input data/bronze/events.parquet 
+    cmd: python -m training.src.silver --input data/bronze/events.parquet
       --output data/silver
     deps:
     - path: data/bronze/events.parquet
@@ -65,7 +65,7 @@ stages:
       size: 28428519
       nfiles: 1
   session_split:
-    cmd: python -m training.src.session_split --input data/silver --output 
+    cmd: python -m training.src.session_split --input data/silver --output
       data/gold/session_split_map.parquet
     deps:
     - path: data/silver
@@ -95,7 +95,7 @@ stages:
       md5: bffbcc1c35fe6edaa65099ea48c6dd41
       size: 7668575
   gold:
-    cmd: python -m training.src.gold --input data/silver --split-map 
+    cmd: python -m training.src.gold --input data/silver --split-map
       data/gold/session_split_map.parquet --output data/gold
     deps:
     - path: data/gold/session_split_map.parquet
@@ -145,8 +145,8 @@ stages:
       md5: 8259539206e15873705dffef72db95a4
       size: 101082163
   train:
-    cmd: python -m training.src.train --train data/gold/train.parquet --val 
-      data/gold/val.parquet --test data/gold/test.parquet --session-split-map 
+    cmd: python -m training.src.train --train data/gold/train.parquet --val
+      data/gold/val.parquet --test data/gold/test.parquet --session-split-map
       data/gold/session_split_map.parquet --device auto
     deps:
     - path: data/gold/session_split_map.parquet

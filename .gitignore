@@ -6,6 +6,7 @@ dataset/**/*.csv.gz
 artifacts/
 .worktrees/
 .superpowers/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

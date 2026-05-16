@@ -43,7 +43,10 @@ def test_prepare_training_frame_keeps_categorical_columns():
 
     assert frame.numeric_columns == NUMERIC_FEATURE_COLUMNS
     assert frame.categorical_columns == CATEGORICAL_FEATURE_COLUMNS
-    assert frame.features.columns.tolist() == NUMERIC_FEATURE_COLUMNS + CATEGORICAL_FEATURE_COLUMNS
+    assert (
+        frame.features.columns.tolist()
+        == NUMERIC_FEATURE_COLUMNS + CATEGORICAL_FEATURE_COLUMNS
+    )
     assert frame.target.tolist() == [0, 1, 0, 1]
 
 

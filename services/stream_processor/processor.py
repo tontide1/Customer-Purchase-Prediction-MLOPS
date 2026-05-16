@@ -28,12 +28,16 @@ def _last_event_time(redis_client, user_session: str) -> dt.datetime | None:
     return _parse_iso_timestamp(value)
 
 
-def _is_late(redis_client, event: dict[str, Any], *, late_threshold_seconds: int) -> bool:
+def _is_late(
+    redis_client, event: dict[str, Any], *, late_threshold_seconds: int
+) -> bool:
     last_event_time = _last_event_time(redis_client, event["user_session"])
     if last_event_time is None:
         return False
     source_event_time = _parse_iso_timestamp(event["source_event_time"])
-    return source_event_time < last_event_time - dt.timedelta(seconds=late_threshold_seconds)
+    return source_event_time < last_event_time - dt.timedelta(
+        seconds=late_threshold_seconds
+    )
 
 
 def process_event(

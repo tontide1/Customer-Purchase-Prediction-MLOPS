@@ -188,12 +188,16 @@ def _write_train_report(
         "winner_validation_average_precision": float(
             winner_metrics["average_precision"]
         ),
-        "winner_validation_threshold": float(winner_metrics.get("optimal_threshold", 0.5)),
+        "winner_validation_threshold": float(
+            winner_metrics.get("optimal_threshold", 0.5)
+        ),
         "test_pr_auc": float(test_metrics["pr_auc"]),
         "test_average_precision": float(test_metrics["average_precision"]),
         "validation_gate_passed": bool(gate_pass),
     }
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True), encoding="utf-8")
+    report_path.write_text(
+        json.dumps(report, indent=2, sort_keys=True), encoding="utf-8"
+    )
 
 
 def _resolve_training_device(

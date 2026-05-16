@@ -124,7 +124,11 @@ def test_build_app_uses_connection_pool_and_wires_runtime_dependencies(monkeypat
     monkeypatch.setitem(
         sys.modules,
         "psycopg",
-        types.SimpleNamespace(connect=lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("connect should not be used"))),
+        types.SimpleNamespace(
+            connect=lambda *args, **kwargs: (_ for _ in ()).throw(
+                AssertionError("connect should not be used")
+            )
+        ),
     )
 
     from services.stream_processor import app as app_module
@@ -146,7 +150,9 @@ def test_build_app_uses_connection_pool_and_wires_runtime_dependencies(monkeypat
         event["late_reason"] = "test_late_reason"
         return "late"
 
-    monkeypatch.setattr(app_module, "create_connection_pool", fake_create_connection_pool)
+    monkeypatch.setattr(
+        app_module, "create_connection_pool", fake_create_connection_pool
+    )
     monkeypatch.setattr(app_module, "ReplayEventStore", FakeReplayStore)
     monkeypatch.setattr(app_module, "process_event", fake_process_event)
 

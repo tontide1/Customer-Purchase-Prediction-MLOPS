@@ -153,6 +153,9 @@ PRE_COMMIT_HOME=/tmp/pre-commit-cache pre-commit run --all-files
 - Gold/session features, categorical-aware model training, and explainability
   are implemented; serving, monitoring, and online hot-reload remain roadmap
   items.
+- Week 3 stream-processing simulator work lives in branch `week3-01` / PR #8:
+  deterministic replay event IDs, bounded replay normalization, Quix-safe
+  publish serialization, and the simulator CLI/container entrypoint.
 - `docs/BLUEPRINT/*.md` and `BLUEPRINT.md` are target-state design documents;
   prefer executable files such as `dvc.yaml` and `training/src/*.py` when there
   is a conflict.

@@ -76,7 +76,9 @@ def _nullable_float(value: Any) -> float | None:
     return float(value)
 
 
-def normalize_raw_row(row: dict[str, Any], replay_time: str | None = None) -> dict[str, Any]:
+def normalize_raw_row(
+    row: dict[str, Any], replay_time: str | None = None
+) -> dict[str, Any]:
     for field in RAW_REQUIRED_FIELDS:
         if field not in row or _is_missing(row[field]):
             raise ValueError(f"Missing required raw field: {field}")
@@ -96,7 +98,10 @@ def normalize_raw_row(row: dict[str, Any], replay_time: str | None = None) -> di
         "category_code": _nullable_text(row.get("category_code")),
         "brand": _nullable_text(row.get("brand")),
         "price": _nullable_float(row.get("price")),
-        "replay_time": replay_time or dt.datetime.now(dt.timezone.utc).replace(tzinfo=None, microsecond=0).isoformat(),
+        "replay_time": replay_time
+        or dt.datetime.now(dt.timezone.utc)
+        .replace(tzinfo=None, microsecond=0)
+        .isoformat(),
         "source": "replay",
     }
     normalized["event_id"] = compute_event_id(
@@ -116,8 +121,12 @@ def iter_replay_events(
     replay_time: str | None = None,
 ) -> Iterable[dict[str, Any]]:
     frame = pd.read_csv(csv_path, usecols=RAW_COLUMNS, nrows=limit)
-    frame[constants.FIELD_EVENT_TIME] = pd.to_datetime(frame[constants.FIELD_EVENT_TIME], utc=True)
-    frame = frame.sort_values(["user_session", constants.FIELD_EVENT_TIME], kind="mergesort")
+    frame[constants.FIELD_EVENT_TIME] = pd.to_datetime(
+        frame[constants.FIELD_EVENT_TIME], utc=True
+    )
+    frame = frame.sort_values(
+        ["user_session", constants.FIELD_EVENT_TIME], kind="mergesort"
+    )
     for row in frame.to_dict(orient="records"):
         yield normalize_raw_row(row, replay_time=replay_time)
 
