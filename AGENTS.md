@@ -7,6 +7,15 @@
 - **Verify First:** Prove your changes work via direct reads, checks, or tests before finishing.
 - **Keep It Simple:** Do not over-engineer. Write straightforward solutions.
 
+## Before editing code
+
+- Use Serena MCP to inspect symbols, references, and related files.
+- Do not rely only on grep, glob, or raw file reads for cross-file changes.
+- For refactor tasks, identify all call sites before editing.
+- Prefer small, surgical patches.
+- Run tests or relevant checks after changes.
+- Explain changed files and why they were changed.
+
 ## What is real in this repo (today)
 
 - Treat `docs/BLUEPRINT/*.md` and `BLUEPRINT.md` as target-state design; many snippets are illustrative, not executable.
