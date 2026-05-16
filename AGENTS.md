@@ -41,6 +41,12 @@
   - `infra/postgres/init.sql` creates the `replay_events` append-log table.
   - `services/stream_processor/requirements.txt` adds service runtime deps not currently listed in base project deps: `redis`, `psycopg`, and `psycopg_pool`.
   - Current root `docker-compose.yml` still only provisions MinIO + MLflow; Redpanda, Redis, PostgreSQL, simulator, and stream processor compose wiring is planned but not yet executable from root compose.
+- **Week 3 serving/prediction API** is implemented in branch/worktree `week3-03`:
+  - `services/stream_processor/state.py` writes the pre-event `serving_*` snapshot into Redis before incrementing the canonical post-event counters/sets.
+  - `services/prediction_api/features.py` and `services/prediction_api/app.py` read only `serving_*` fields, return the existing `redis_miss` fallback on incomplete state, use constant-time API key validation, and fail fast when `MLFLOW_SERVING_BUNDLE_URI` is missing.
+  - `services/prediction_api/Dockerfile` uses the factory entrypoint `services.prediction_api.app:create_runtime_app`.
+  - `training/src/train.py` raises when logging the serving bundle without an active MLflow run.
+  - `training/tests/test_train.py` isolates pytest report output to `reports/train_metrics_pytest.json` so the tracked `reports/train_metrics.json` stays untouched during test runs.
 - Executable data & training foundation exists in:
   - `training/src/config.py`, `training/src/bronze.py`, `training/src/silver.py`
   - `training/src/features.py`, `training/src/session_split.py`, `training/src/gold.py`
