@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hmac
 import os
 from dataclasses import dataclass
 from functools import lru_cache
@@ -26,9 +27,11 @@ class PredictionAPISettings:
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "PredictionAPISettings":
         source = os.environ if env is None else env
-        bundle_uri = source.get("MLFLOW_SERVING_BUNDLE_URI", "")
+        bundle_uri = source.get("MLFLOW_SERVING_BUNDLE_URI") or source.get(
+            "MLFLOW_BUNDLE_URI"
+        )
         if not bundle_uri:
-            bundle_uri = source.get("MLFLOW_BUNDLE_URI", "")
+            raise ValueError("MLFLOW serving bundle URI must be configured")
         return cls(
             api_key=source.get("API_KEY", ""),
             redis_url=source.get("REDIS_URL", "redis://redis:6379/0"),
@@ -62,14 +65,18 @@ def validate_user_session(user_session: str) -> str:
 
     if not re.fullmatch(USER_SESSION_PATTERN, user_session):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Invalid user_session",
         )
     return user_session
 
 
 def validate_api_key(expected_api_key: str, provided_api_key: str | None) -> None:
-    if not expected_api_key or provided_api_key != expected_api_key:
+    if (
+        not expected_api_key
+        or provided_api_key is None
+        or not hmac.compare_digest(provided_api_key, expected_api_key)
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Unauthorized",
@@ -161,6 +168,8 @@ def create_app(
     bundle_loader: Callable[[str], ServingBundle] | None = None,
 ) -> FastAPI:
     resolved_settings = settings or PredictionAPISettings.from_env()
+    if not resolved_settings.mlflow_bundle_uri:
+        raise ValueError("MLFLOW serving bundle URI must be configured")
     redis_factory = redis_client_factory or _default_redis_client_factory
     serving_bundle_loader = bundle_loader or load_serving_bundle
 
@@ -195,4 +204,5 @@ def create_app(
     return app
 
 
-app = create_app()
+def create_runtime_app() -> FastAPI:
+    return create_app()

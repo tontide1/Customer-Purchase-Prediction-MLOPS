@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hmac
 
 import numpy as np
 import pytest
@@ -55,15 +56,28 @@ def _redis_state() -> dict[str, dict[str, str]]:
     return {
         "session:session-1": {
             "first_event_time": "2019-11-01T00:00:00+00:00",
-            "last_event_time": "2019-11-01T00:02:00+00:00",
-            "count_view": "2",
-            "count_cart": "1",
+            "last_event_time": "2019-11-01T00:03:00+00:00",
+            "count_view": "3",
+            "count_cart": "2",
             "count_remove_from_cart": "1",
             "latest_price": "12.5",
-            "latest_category_id": "cat-id",
-            "latest_category_code": "",
-            "latest_brand": "",
+            "latest_category_id": "post-cat-id",
+            "latest_category_code": "post.category.code",
+            "latest_brand": "post-brand",
             "latest_event_type": "cart",
+            "serving_total_views": "2",
+            "serving_total_carts": "1",
+            "serving_total_removes": "0",
+            "serving_net_cart_count": "1",
+            "serving_cart_to_view_ratio": "0.5",
+            "serving_unique_categories": "2",
+            "serving_unique_products": "3",
+            "serving_session_duration_sec": "120.0",
+            "serving_price": "9.99",
+            "serving_category_id": "cat-id",
+            "serving_category_code": "",
+            "serving_brand": "",
+            "serving_event_type": "view",
         }
     }
 
@@ -91,7 +105,7 @@ def _bundle(model) -> ServingBundle:
             "category_id": {"__MISSING__": 0, "__UNK__": 1, "cat-id": 2},
             "category_code": {"__MISSING__": 0, "__UNK__": 1},
             "brand": {"__MISSING__": 0, "__UNK__": 1},
-            "event_type": {"__MISSING__": 0, "__UNK__": 1, "cart": 2},
+            "event_type": {"__MISSING__": 0, "__UNK__": 1, "view": 2, "cart": 3},
         },
         missing_token="__MISSING__",
         unknown_token="__UNK__",
@@ -117,6 +131,11 @@ def test_settings_from_env_reads_runtime_values():
     )
 
 
+def test_settings_from_env_requires_bundle_uri():
+    with pytest.raises(ValueError, match="MLFLOW.*bundle"):
+        PredictionAPISettings.from_env({"API_KEY": "env-secret"})
+
+
 def test_create_app_exposes_health_and_predict_routes():
     app = create_app(_settings())
 
@@ -134,6 +153,20 @@ def test_validate_api_key_rejects_missing_or_invalid_key():
     with pytest.raises(HTTPException, match="Unauthorized") as excinfo:
         validate_api_key("secret-key", "wrong")
     assert excinfo.value.status_code == 401
+
+
+def test_validate_api_key_uses_constant_time_compare(monkeypatch):
+    calls: list[tuple[str, str]] = []
+
+    def fake_compare_digest(left: str, right: str) -> bool:
+        calls.append((left, right))
+        return True
+
+    monkeypatch.setattr(hmac, "compare_digest", fake_compare_digest)
+
+    validate_api_key("secret-key", "secret-key")
+
+    assert calls == [("secret-key", "secret-key")]
 
 
 def test_validate_user_session_rejects_invalid_values():
@@ -230,5 +263,13 @@ def test_build_prediction_response_returns_model_backed_response_from_class_one_
         "brand",
         "event_type",
     ]
+    assert model.inputs[0].iloc[0]["total_views"] == 2
+    assert model.inputs[0].iloc[0]["total_carts"] == 1
+    assert model.inputs[0].iloc[0]["net_cart_count"] == 1
+    assert model.inputs[0].iloc[0]["unique_categories"] == 2
+    assert model.inputs[0].iloc[0]["unique_products"] == 3
+    assert model.inputs[0].iloc[0]["session_duration_sec"] == 120.0
+    assert model.inputs[0].iloc[0]["price"] == 9.99
+    assert model.inputs[0].iloc[0]["event_type"] == "view"
     assert model.inputs[0].iloc[0]["category_code"] == "__MISSING__"
     assert model.inputs[0].iloc[0]["brand"] == "__MISSING__"

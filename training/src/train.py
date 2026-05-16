@@ -94,13 +94,18 @@ def _log_model_artifact(candidate_name: str, model) -> None:
 
 
 def _log_serving_model_artifact(model) -> str:
+    active_run = mlflow.active_run()
+    if active_run is None:
+        raise RuntimeError(
+            "Cannot log serving bundle without an active MLflow run"
+        )
+
     with tempfile.TemporaryDirectory(prefix="winner-serving-model-") as tmp_dir:
         model_path = Path(tmp_dir) / SERVING_MODEL_ARTIFACT_FILE
         joblib.dump(model, model_path)
         mlflow.log_artifact(str(model_path), artifact_path=SERVING_MODEL_ARTIFACT_PATH)
 
-    active_run = mlflow.active_run()
-    run_id = active_run.info.run_id if active_run is not None else ""
+    run_id = active_run.info.run_id
     return f"runs:/{run_id}/{SERVING_MODEL_ARTIFACT_PATH}/{SERVING_MODEL_ARTIFACT_FILE}"
 
 

@@ -21,6 +21,9 @@ class FakeRedis:
     def sadd(self, key, value):
         self.sets.setdefault(key, set()).add(value)
 
+    def scard(self, key):
+        return len(self.sets.get(key, set()))
+
     def expire(self, key, ttl_seconds):
         self.ttls[key] = ttl_seconds
 
@@ -119,6 +122,19 @@ def test_apply_event_initializes_hash_sets_ttl_and_invalidates_cache():
         "latest_category_code": "",
         "latest_brand": "",
         "latest_event_type": "view",
+        "serving_total_views": "0",
+        "serving_total_carts": "0",
+        "serving_total_removes": "0",
+        "serving_net_cart_count": "0",
+        "serving_cart_to_view_ratio": "0.0",
+        "serving_unique_categories": "0",
+        "serving_unique_products": "0",
+        "serving_session_duration_sec": "0.0",
+        "serving_price": "0",
+        "serving_category_id": "cat-id",
+        "serving_category_code": "",
+        "serving_brand": "",
+        "serving_event_type": "view",
     }
     assert redis.sets["session:session-1:products"] == {"100"}
     assert redis.sets["session:session-1:categories"] == {"cat-id"}
@@ -166,6 +182,19 @@ def test_apply_event_updates_counts_preserves_first_event_and_normalizes_categor
     assert state["latest_price"] == "0"
     assert state["latest_category_code"] == ""
     assert state["latest_brand"] == ""
+    assert state["serving_total_views"] == "1"
+    assert state["serving_total_carts"] == "1"
+    assert state["serving_total_removes"] == "0"
+    assert state["serving_net_cart_count"] == "1"
+    assert state["serving_cart_to_view_ratio"] == "1.0"
+    assert state["serving_unique_categories"] == "2"
+    assert state["serving_unique_products"] == "2"
+    assert state["serving_session_duration_sec"] == "180.0"
+    assert state["serving_price"] == "0"
+    assert state["serving_category_id"] == "cat-id"
+    assert state["serving_category_code"] == ""
+    assert state["serving_brand"] == ""
+    assert state["serving_event_type"] == "remove_from_cart"
     assert redis.sets["session:session-1:categories"] == {"cat-id", "category.code"}
 
 
@@ -186,6 +215,19 @@ def test_apply_event_uses_pipeline_and_queues_correct_operations():
         "latest_category_code": "",
         "latest_brand": "",
         "latest_event_type": "view",
+        "serving_total_views": "0",
+        "serving_total_carts": "0",
+        "serving_total_removes": "0",
+        "serving_net_cart_count": "0",
+        "serving_cart_to_view_ratio": "0.0",
+        "serving_unique_categories": "0",
+        "serving_unique_products": "0",
+        "serving_session_duration_sec": "0.0",
+        "serving_price": "0",
+        "serving_category_id": "cat-id",
+        "serving_category_code": "",
+        "serving_brand": "",
+        "serving_event_type": "view",
     }
 
     assert pipeline.execute_called is True

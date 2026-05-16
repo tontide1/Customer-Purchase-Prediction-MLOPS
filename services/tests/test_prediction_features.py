@@ -19,15 +19,28 @@ class FakeRedis:
         self.hashes = {
             "session:session-1": {
                 "first_event_time": "2019-11-01T00:00:00+00:00",
-                "last_event_time": "2019-11-01T00:02:00+00:00",
-                "count_view": "2",
-                "count_cart": "1",
+                "last_event_time": "2019-11-01T00:03:00+00:00",
+                "count_view": "3",
+                "count_cart": "2",
                 "count_remove_from_cart": "1",
-                "latest_price": "0",
-                "latest_category_id": "cat-id",
-                "latest_category_code": "",
-                "latest_brand": "",
+                "latest_price": "12.5",
+                "latest_category_id": "post-cat-id",
+                "latest_category_code": "post.category.code",
+                "latest_brand": "post-brand",
                 "latest_event_type": "cart",
+                "serving_total_views": "2",
+                "serving_total_carts": "1",
+                "serving_total_removes": "0",
+                "serving_net_cart_count": "1",
+                "serving_cart_to_view_ratio": "0.5",
+                "serving_unique_categories": "2",
+                "serving_unique_products": "3",
+                "serving_session_duration_sec": "120.0",
+                "serving_price": "9.99",
+                "serving_category_id": "cat-id",
+                "serving_category_code": "",
+                "serving_brand": "",
+                "serving_event_type": "view",
             }
         }
         self.sets = {
@@ -39,6 +52,10 @@ class FakeRedis:
         return self.hashes.get(key, {}).copy()
 
     def scard(self, key):
+        if key.endswith(":products"):
+            return 99
+        if key.endswith(":categories"):
+            return 88
         return len(self.sets.get(key, set()))
 
 
@@ -65,7 +82,7 @@ def _bundle() -> ServingBundle:
             "category_id": {"__MISSING__": 0, "__UNK__": 1, "cat-id": 2},
             "category_code": {"__MISSING__": 0, "__UNK__": 1},
             "brand": {"__MISSING__": 0, "__UNK__": 1},
-            "event_type": {"__MISSING__": 0, "__UNK__": 1, "cart": 2},
+            "event_type": {"__MISSING__": 0, "__UNK__": 1, "view": 2, "cart": 3},
         },
         missing_token="__MISSING__",
         unknown_token="__UNK__",
@@ -148,19 +165,28 @@ def test_build_feature_row_matches_online_state_semantics():
     assert row.iloc[0].to_dict() == {
         "total_views": 2,
         "total_carts": 1,
-        "net_cart_count": 0,
+        "net_cart_count": 1,
         "cart_to_view_ratio": 0.5,
-        "unique_categories": 1,
-        "unique_products": 2,
+        "unique_categories": 2,
+        "unique_products": 3,
         "session_duration_sec": 120.0,
-        "price": 0.0,
+        "price": 9.99,
         "category_id": "cat-id",
         "category_code": "__MISSING__",
         "brand": "__MISSING__",
-        "event_type": "cart",
+        "event_type": "view",
     }
     assert str(row["category_id"].dtype) == "category"
     assert list(row["category_id"].cat.categories) == ["__MISSING__", "__UNK__", "cat-id"]
+
+
+def test_build_feature_row_returns_none_when_serving_snapshot_is_incomplete():
+    redis = FakeRedis()
+    redis.hashes["session:session-1"].pop("serving_unique_products")
+
+    row = build_feature_row(redis, "session-1", _bundle())
+
+    assert row is None
 
 
 def test_build_feature_row_returns_none_on_redis_miss():

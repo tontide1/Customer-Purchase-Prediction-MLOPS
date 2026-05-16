@@ -19,6 +19,7 @@ from training.src.train import (
     main,
     _catboost_params,
     _lightgbm_params,
+    _log_serving_bundle,
     _xgboost_params,
     train_catboost_candidate,
     train_lightgbm_candidate,
@@ -185,6 +186,14 @@ class _FakeMlflow:
 class _FakeModel:
     def predict_proba(self, *args, **kwargs):
         return np.array([[0.1, 0.9]])
+
+
+@pytest.fixture(autouse=True)
+def _isolate_train_report_path(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "training.src.train.TRAIN_REPORT_PATH",
+        tmp_path / "reports" / "train_metrics_pytest.json",
+    )
 
 
 def _stub_shap_hooks(monkeypatch, shap_path: Path):
@@ -667,7 +676,7 @@ def test_main_logs_test_metrics_for_selected_winner(gold_data, monkeypatch, tmp_
         "xgboost",
         "catboost_test_evaluation",
     ]
-    report_path = tmp_path / "reports" / "train_metrics.json"
+    report_path = tmp_path / "reports" / "train_metrics_pytest.json"
     assert report_path.exists()
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["winner_name"] == "catboost"
@@ -771,3 +780,26 @@ def test_main_logs_serving_bundle_on_winner_test_run(gold_data, monkeypatch, tmp
         and str(args[0]).endswith("model.joblib")
         for args, kwargs in test_run["artifacts"]
     )
+
+
+def test_log_serving_bundle_requires_an_active_mlflow_run(monkeypatch):
+    fake_mlflow = _FakeMlflow()
+    monkeypatch.setattr("training.src.train.mlflow", fake_mlflow)
+
+    data = SimpleNamespace(
+        numeric_columns=list(NUMERIC_FEATURE_COLUMNS),
+        categorical_columns=list(CATEGORICAL_FEATURE_COLUMNS),
+        categorical_artifacts=SimpleNamespace(
+            category_maps={"category_id": {"cat-id": 0}},
+            missing_token="__MISSING__",
+            unknown_token="__UNK__",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="active MLflow run"):
+        _log_serving_bundle(
+            winner_name="catboost",
+            winner_model=_FakeModel(),
+            data=data,
+            winner_threshold=0.42,
+        )
