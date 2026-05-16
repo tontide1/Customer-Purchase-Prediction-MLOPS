@@ -32,8 +32,11 @@ class PredictionAPISettings:
         )
         if not bundle_uri:
             raise ValueError("MLFLOW serving bundle URI must be configured")
+        api_key = source.get("API_KEY")
+        if not api_key:
+            raise ValueError("API_KEY must be configured")
         return cls(
-            api_key=source.get("API_KEY", ""),
+            api_key=api_key,
             redis_url=source.get("REDIS_URL", "redis://redis:6379/0"),
             mlflow_bundle_uri=bundle_uri,
         )

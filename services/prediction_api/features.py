@@ -90,10 +90,12 @@ def build_feature_row(
                 unknown_token=bundle.unknown_token,
             ),
         }
+        frame = pd.DataFrame(
+            [{column: values[column] for column in bundle.feature_column_order}]
+        )
     except (KeyError, TypeError, ValueError):
         return None
 
-    frame = pd.DataFrame([{column: values[column] for column in bundle.feature_column_order}])
     for column, mapping in bundle.category_maps.items():
         frame[column] = pd.Categorical(
             frame[column],
