@@ -65,7 +65,7 @@ services:
       - mlops_net
 
   redpanda:
-    image: redpandadata/redpanda:latest
+    image: redpandadata/redpanda:24.1.5
     container_name: redpanda
     command:
       - redpanda
