@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict
 
 import mlflow
+import joblib
 import numpy as np
 import optuna
 import pandas as pd
@@ -46,6 +47,9 @@ MIN_VALIDATION_PR_AUC_THRESHOLD = Config.MIN_VALIDATION_PR_AUC_THRESHOLD
 TRAIN_DEVICE = Config.TRAIN_DEVICE
 GPU_DEVICE_ID = Config.GPU_DEVICE_ID
 TEST_SAMPLE_SIZE = Config.TEST_SAMPLE_SIZE
+RESPONSE_CONTRACT_VERSION = "v1"
+SERVING_MODEL_ARTIFACT_PATH = "serving/model"
+SERVING_MODEL_ARTIFACT_FILE = "model.joblib"
 TRAIN_REPORT_PATH = Path("reports/train_metrics.json")
 
 
@@ -89,6 +93,17 @@ def _log_model_artifact(candidate_name: str, model) -> None:
     mlflow.sklearn.log_model(model, "model")
 
 
+def _log_serving_model_artifact(model) -> str:
+    with tempfile.TemporaryDirectory(prefix="winner-serving-model-") as tmp_dir:
+        model_path = Path(tmp_dir) / SERVING_MODEL_ARTIFACT_FILE
+        joblib.dump(model, model_path)
+        mlflow.log_artifact(str(model_path), artifact_path=SERVING_MODEL_ARTIFACT_PATH)
+
+    active_run = mlflow.active_run()
+    run_id = active_run.info.run_id if active_run is not None else ""
+    return f"runs:/{run_id}/{SERVING_MODEL_ARTIFACT_PATH}/{SERVING_MODEL_ARTIFACT_FILE}"
+
+
 def _prepare_shap_sample(test_features: pd.DataFrame) -> pd.DataFrame:
     if len(test_features) <= TEST_SAMPLE_SIZE:
         return test_features
@@ -108,6 +123,54 @@ def _log_winner_shap_artifacts(model, test_features: pd.DataFrame) -> None:
         explainer_path = Path(temp_dir) / "explainer.pkl"
         serialize_explainer(shap_artifacts["explainer"], explainer_path)
         mlflow.log_artifact(str(explainer_path), artifact_path="shap")
+
+
+def _log_serving_bundle(
+    *,
+    winner_name: str,
+    winner_model,
+    data: PreparedTrainingData,
+    winner_threshold: float,
+) -> None:
+    model_uri = _log_serving_model_artifact(winner_model)
+    active_run = mlflow.active_run()
+    run_id = active_run.info.run_id if active_run is not None else ""
+    mlflow.log_dict(
+        {
+            "model_type": winner_name,
+            "model_name": winner_name,
+            "run_id": run_id,
+            "model_uri": model_uri,
+            "artifact_path": SERVING_MODEL_ARTIFACT_PATH,
+            "artifact_file": SERVING_MODEL_ARTIFACT_FILE,
+            "load_flavor": "joblib",
+            "probability_method": "predict_proba",
+        },
+        "serving/model_metadata.json",
+    )
+    mlflow.log_dict(
+        {"columns": NUMERIC_FEATURE_COLUMNS + CATEGORICAL_FEATURE_COLUMNS},
+        "serving/feature_column_order.json",
+    )
+    mlflow.log_dict(
+        {
+            "category_maps": data.categorical_artifacts.category_maps,
+            "missing_token": data.categorical_artifacts.missing_token,
+            "unknown_token": data.categorical_artifacts.unknown_token,
+        },
+        "serving/categorical_encoding.json",
+    )
+    mlflow.log_dict(
+        {"optimal_threshold": float(winner_threshold)},
+        "serving/threshold.json",
+    )
+    mlflow.log_dict(
+        {
+            "prediction_horizon_minutes": Config.PREDICTION_HORIZON_MINUTES,
+            "response_contract_version": RESPONSE_CONTRACT_VERSION,
+        },
+        "serving/prediction_contract.json",
+    )
 
 
 def _write_train_report(
@@ -592,6 +655,12 @@ def main() -> int:
             metric_prefix="test_",
         )
         _log_winner_shap_artifacts(winner_data["model"], data.test_features)
+        _log_serving_bundle(
+            winner_name=winner_name,
+            winner_model=winner_data["model"],
+            data=data,
+            winner_threshold=winner_threshold,
+        )
     logger.info(
         "Test results for %s: PR-AUC=%.4f, average_precision=%.4f",
         winner_name,
