@@ -149,7 +149,7 @@ def _log_serving_bundle(
         "serving/model_metadata.json",
     )
     mlflow.log_dict(
-        {"columns": NUMERIC_FEATURE_COLUMNS + CATEGORICAL_FEATURE_COLUMNS},
+        {"columns": data.numeric_columns + data.categorical_columns},
         "serving/feature_column_order.json",
     )
     mlflow.log_dict(
@@ -641,8 +641,19 @@ def main() -> int:
         winner_data["metrics"]["pr_auc"],
     )
 
+    gate_pass = validate_model_gate(
+        new_model_pr_auc=winner_data["metrics"]["pr_auc"],
+        production_model_pr_auc=None,
+        min_threshold=MIN_VALIDATION_PR_AUC_THRESHOLD,
+    )
+
+    if not gate_pass:
+        logger.error("Model failed validation gate")
+        return 1
+
     with mlflow.start_run(run_name=f"{winner_name}_test_evaluation"):
         mlflow.log_dict(lineage_metadata, "lineage/metadata.json")
+        mlflow.log_metrics({"validation_gate_passed": float(gate_pass)})
         test_metrics = evaluate_winner_on_test(
             winner_data["model"],
             data.test_features,
@@ -667,16 +678,6 @@ def main() -> int:
         test_metrics["pr_auc"],
         test_metrics["average_precision"],
     )
-
-    gate_pass = validate_model_gate(
-        new_model_pr_auc=winner_data["metrics"]["pr_auc"],
-        production_model_pr_auc=None,
-        min_threshold=MIN_VALIDATION_PR_AUC_THRESHOLD,
-    )
-
-    if not gate_pass:
-        logger.error("Model failed validation gate")
-        return 1
 
     _write_train_report(
         winner_name=winner_name,

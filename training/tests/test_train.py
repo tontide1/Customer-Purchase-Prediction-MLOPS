@@ -24,6 +24,10 @@ from training.src.train import (
     train_lightgbm_candidate,
     train_xgboost_candidate,
 )
+from training.src.categorical_features import (
+    CATEGORICAL_FEATURE_COLUMNS,
+    NUMERIC_FEATURE_COLUMNS,
+)
 
 
 @pytest.fixture
@@ -674,6 +678,7 @@ def test_main_logs_test_metrics_for_selected_winner(gold_data, monkeypatch, tmp_
         test_run_metrics.update(batch)
     assert "test_pr_auc" in test_run_metrics
     assert "test_average_precision" in test_run_metrics
+    assert test_run_metrics["validation_gate_passed"] == 1.0
 
 
 def test_main_logs_serving_bundle_on_winner_test_run(gold_data, monkeypatch, tmp_path):
@@ -739,20 +744,7 @@ def test_main_logs_serving_bundle_on_winner_test_run(gold_data, monkeypatch, tmp
     test_run = fake_mlflow.runs[-1]
     logged_dicts = {args[1]: args[0] for args, _ in test_run["dicts"]}
     assert logged_dicts["serving/feature_column_order.json"] == {
-        "columns": [
-            "total_views",
-            "total_carts",
-            "net_cart_count",
-            "cart_to_view_ratio",
-            "unique_categories",
-            "unique_products",
-            "session_duration_sec",
-            "price",
-            "category_id",
-            "category_code",
-            "brand",
-            "event_type",
-        ]
+        "columns": NUMERIC_FEATURE_COLUMNS + CATEGORICAL_FEATURE_COLUMNS
     }
     categorical_encoding = logged_dicts["serving/categorical_encoding.json"]
     assert "category_maps" in categorical_encoding
@@ -771,7 +763,9 @@ def test_main_logs_serving_bundle_on_winner_test_run(gold_data, monkeypatch, tmp
     assert model_metadata["artifact_file"] == "model.joblib"
     assert model_metadata["load_flavor"] == "joblib"
     assert model_metadata["probability_method"] == "predict_proba"
-    assert model_metadata["model_uri"] == "runs:/run-4/serving/model/model.joblib"
+    assert model_metadata["model_uri"] == (
+        f"runs:/{test_run['run_id']}/serving/model/model.joblib"
+    )
     assert any(
         kwargs.get("artifact_path") == "serving/model"
         and str(args[0]).endswith("model.joblib")
