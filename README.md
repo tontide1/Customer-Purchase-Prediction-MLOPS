@@ -18,6 +18,11 @@ state for the remaining serving/monitoring pieces.
   and per-event gold snapshots for train/val/test.
 - Training pipeline: compares `CatBoost`, `LightGBM`, and `XGBoost` on the
   gold snapshots, logs to MLflow, and selects the winner by validation PR-AUC.
+- Week 3 stream processing and serving: the simulator, stream processor, and
+  Redis-backed prediction API are implemented in `services/`. The stream
+  processor stores pre-event `serving_*` snapshots for model inference, and the
+  prediction API falls back cleanly when the Redis snapshot is missing or
+  incomplete.
 - DVC pipeline: `bronze -> silver -> session_split -> gold -> train`.
 - Local MinIO scaffold for future object storage integration.
 
@@ -151,11 +156,13 @@ PRE_COMMIT_HOME=/tmp/pre-commit-cache pre-commit run --all-files
 ## Current Limits
 
 - Gold/session features, categorical-aware model training, and explainability
-  are implemented; serving, monitoring, and online hot-reload remain roadmap
-  items.
+  are implemented; monitoring and online hot-reload remain roadmap items.
 - Week 3 stream-processing simulator work lives in branch `week3-01` / PR #8:
   deterministic replay event IDs, bounded replay normalization, Quix-safe
   publish serialization, and the simulator CLI/container entrypoint.
+- Week 3 stream processor and serving work lives in branch/worktree
+  `week3-03`: the Redis-backed pre-event serving snapshot, the prediction API,
+  and the MLflow serving bundle logging guard are implemented there.
 - `docs/BLUEPRINT/*.md` and `BLUEPRINT.md` are target-state design documents;
   prefer executable files such as `dvc.yaml` and `training/src/*.py` when there
   is a conflict.
