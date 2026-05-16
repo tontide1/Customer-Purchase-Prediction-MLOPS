@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
 from scripts.week3_compose_smoke import build_ci_fixture, require_real_serving_bundle_uri

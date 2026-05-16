@@ -38,6 +38,9 @@ class FakeRedis:
     def sadd(self, key, value):
         self.sets.setdefault(key, set()).add(value)
 
+    def scard(self, key):
+        return len(self.sets.get(key, set()))
+
     def expire(self, key, ttl_seconds):
         self.expiries[key] = ttl_seconds
 
