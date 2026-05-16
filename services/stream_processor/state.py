@@ -48,6 +48,13 @@ def _normalize_utc_timestamp_text(value: Any) -> str:
     return timestamp.isoformat()
 
 
+def _session_duration_seconds(first_event_time: str, current_event_time: str) -> float:
+    return (
+        dt.datetime.fromisoformat(current_event_time)
+        - dt.datetime.fromisoformat(first_event_time)
+    ).total_seconds()
+
+
 def apply_event_to_session_state(
     redis_client, event: dict[str, Any], *, ttl_seconds: int
 ) -> None:
@@ -60,6 +67,15 @@ def apply_event_to_session_state(
     count_view = int(_state_value(current, "count_view", "0"))
     count_cart = int(_state_value(current, "count_cart", "0"))
     count_remove = int(_state_value(current, "count_remove_from_cart", "0"))
+    serving_total_views = count_view
+    serving_total_carts = count_cart
+    serving_total_removes = count_remove
+    serving_net_cart_count = serving_total_carts - serving_total_removes
+    serving_cart_to_view_ratio = (
+        0.0 if serving_total_views == 0 else serving_total_carts / serving_total_views
+    )
+    serving_unique_products = redis_client.scard(products_key)
+    serving_unique_categories = redis_client.scard(categories_key)
 
     if event["event_type"] == "view":
         count_view += 1
@@ -85,6 +101,21 @@ def apply_event_to_session_state(
         "latest_category_code": _latest_nullable_text(event.get("category_code")),
         "latest_brand": _latest_nullable_text(event.get("brand")),
         "latest_event_type": event["event_type"],
+        "serving_total_views": str(serving_total_views),
+        "serving_total_carts": str(serving_total_carts),
+        "serving_total_removes": str(serving_total_removes),
+        "serving_net_cart_count": str(serving_net_cart_count),
+        "serving_cart_to_view_ratio": str(serving_cart_to_view_ratio),
+        "serving_unique_categories": str(serving_unique_categories),
+        "serving_unique_products": str(serving_unique_products),
+        "serving_session_duration_sec": str(
+            _session_duration_seconds(first_event_time, last_event_time)
+        ),
+        "serving_price": str(price),
+        "serving_category_id": event["category_id"],
+        "serving_category_code": _latest_nullable_text(event.get("category_code")),
+        "serving_brand": _latest_nullable_text(event.get("brand")),
+        "serving_event_type": event["event_type"],
     }
     category_value = normalize_category_value(
         None if _is_missing(event.get("category_code")) else event.get("category_code"),

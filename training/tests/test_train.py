@@ -19,10 +19,15 @@ from training.src.train import (
     main,
     _catboost_params,
     _lightgbm_params,
+    _log_serving_bundle,
     _xgboost_params,
     train_catboost_candidate,
     train_lightgbm_candidate,
     train_xgboost_candidate,
+)
+from training.src.categorical_features import (
+    CATEGORICAL_FEATURE_COLUMNS,
+    NUMERIC_FEATURE_COLUMNS,
 )
 
 
@@ -99,18 +104,24 @@ class _DummyRun:
         self.run_name = run_name
 
     def __enter__(self):
+        run_id = f"run-{len(self.mlflow.runs) + 1}"
         run = {
             "run_name": self.run_name,
+            "run_id": run_id,
             "metrics": [],
             "dicts": [],
             "texts": [],
+            "artifacts": [],
         }
         self.mlflow.runs.append(run)
         self.mlflow._current_run = run
+        self.info = SimpleNamespace(run_id=run_id)
+        self.mlflow._active_run = self
         return self
 
     def __exit__(self, exc_type, exc, tb):
         self.mlflow._current_run = None
+        self.mlflow._active_run = None
         return False
 
 
@@ -118,6 +129,7 @@ class _FakeMlflow:
     def __init__(self):
         self.runs = []
         self._current_run = None
+        self._active_run = None
         self.logged_models = []
         self.logged_artifacts = []
         self.sklearn = SimpleNamespace(
@@ -154,6 +166,9 @@ class _FakeMlflow:
     def start_run(self, *args, **kwargs):
         return _DummyRun(self, kwargs.get("run_name"))
 
+    def active_run(self):
+        return self._active_run
+
     def log_dict(self, *args, **kwargs):
         if self._current_run is not None:
             self._current_run["dicts"].append((args, kwargs))
@@ -179,6 +194,14 @@ class _FakeMlflow:
 class _FakeModel:
     def predict_proba(self, *args, **kwargs):
         return np.array([[0.1, 0.9]])
+
+
+@pytest.fixture(autouse=True)
+def _isolate_train_report_path(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        "training.src.train.TRAIN_REPORT_PATH",
+        tmp_path / "reports" / "train_metrics_pytest.json",
+    )
 
 
 def _stub_shap_hooks(monkeypatch, shap_path: Path):
@@ -542,6 +565,73 @@ def test_auto_device_falls_back_to_cpu_when_gpu_fails(gold_data, monkeypatch):
     assert recorded_devices == ["gpu", "cpu"]
 
 
+def test_auto_device_falls_back_for_gpu_failure_message_in_non_runtime_error(
+    gold_data, monkeypatch
+):
+    fake_mlflow = _FakeMlflow()
+    monkeypatch.setattr("training.src.train.mlflow", fake_mlflow)
+    monkeypatch.setattr("training.src.train.OPTUNA_SMOKE_TRIALS", 1)
+    _stub_shap_hooks(monkeypatch, Path(gold_data["train_path"]).with_name("shap.png"))
+
+    calls = {"cat": 0}
+    recorded_devices: list[str] = []
+
+    def cat_train(*args, **kwargs):
+        calls["cat"] += 1
+        recorded_devices.append(kwargs["device"])
+        if calls["cat"] == 1:
+            raise ValueError("CUDA out of memory")
+        return _FakeModel(), {
+            "pr_auc": 0.8,
+            "average_precision": 0.8,
+            "confusion_matrix": np.array([[1, 0], [0, 1]]),
+        }
+
+    def ok_train(*args, **kwargs):
+        return _FakeModel(), {
+            "pr_auc": 0.8,
+            "average_precision": 0.8,
+            "confusion_matrix": np.array([[1, 0], [0, 1]]),
+        }
+
+    monkeypatch.setattr("training.src.train.train_catboost_candidate", cat_train)
+    monkeypatch.setattr("training.src.train.train_lightgbm_candidate", ok_train)
+    monkeypatch.setattr("training.src.train.train_xgboost_candidate", ok_train)
+    monkeypatch.setattr(
+        "training.src.train.evaluate_winner_on_test",
+        lambda *args, **kwargs: {
+            "pr_auc": 0.8,
+            "average_precision": 0.8,
+            "confusion_matrix": np.array([[1, 0], [0, 1]]),
+        },
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "training.src.train",
+            "--train",
+            gold_data["train_path"],
+            "--val",
+            gold_data["val_path"],
+            "--test",
+            gold_data["test_path"],
+            "--session-split-map",
+            gold_data["split_map_path"],
+            "--smoke-mode",
+            "--device",
+            "auto",
+            "--gpu-device-id",
+            "0",
+        ],
+    )
+
+    assert main() == 0
+    assert calls["cat"] == 2
+    assert recorded_devices == ["gpu", "cpu"]
+
+
 def test_main_logs_test_metrics_for_selected_winner(gold_data, monkeypatch, tmp_path):
     fake_mlflow = _FakeMlflow()
     monkeypatch.setattr("training.src.train.mlflow", fake_mlflow)
@@ -596,7 +686,7 @@ def test_main_logs_test_metrics_for_selected_winner(gold_data, monkeypatch, tmp_
         "xgboost",
         "catboost_test_evaluation",
     ]
-    report_path = tmp_path / "reports" / "train_metrics.json"
+    report_path = tmp_path / "reports" / "train_metrics_pytest.json"
     assert report_path.exists()
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["winner_name"] == "catboost"
@@ -607,3 +697,119 @@ def test_main_logs_test_metrics_for_selected_winner(gold_data, monkeypatch, tmp_
         test_run_metrics.update(batch)
     assert "test_pr_auc" in test_run_metrics
     assert "test_average_precision" in test_run_metrics
+    assert test_run_metrics["validation_gate_passed"] == 1.0
+
+
+def test_main_logs_serving_bundle_on_winner_test_run(gold_data, monkeypatch, tmp_path):
+    fake_mlflow = _FakeMlflow()
+    monkeypatch.setattr("training.src.train.mlflow", fake_mlflow)
+    monkeypatch.setattr("training.src.train.OPTUNA_SMOKE_TRIALS", 1)
+    monkeypatch.chdir(tmp_path)
+
+    shap_summary = Path(gold_data["train_path"]).with_name("shap-summary.png")
+    shap_summary.write_bytes(b"png")
+    monkeypatch.setattr(
+        "training.src.train.generate_shap_artifacts",
+        lambda *args, **kwargs: {
+            "explainer": object(),
+            "summary_values": np.array([[1.0]]),
+            "summary_plot_path": str(shap_summary),
+        },
+    )
+    monkeypatch.setattr(
+        "training.src.train.serialize_explainer",
+        lambda explainer, path: Path(path).write_bytes(b"explainer"),
+    )
+
+    def fake_train(*args, **kwargs):
+        return _FakeModel(), {
+            "pr_auc": 0.9,
+            "average_precision": 0.9,
+            "optimal_threshold": 0.42,
+            "confusion_matrix": np.array([[1, 0], [0, 1]]),
+        }
+
+    monkeypatch.setattr("training.src.train.train_catboost_candidate", fake_train)
+    monkeypatch.setattr("training.src.train.train_lightgbm_candidate", fake_train)
+    monkeypatch.setattr("training.src.train.train_xgboost_candidate", fake_train)
+    monkeypatch.setattr(
+        "training.src.train.evaluate_winner_on_test",
+        lambda *args, **kwargs: {
+            "pr_auc": 0.8,
+            "average_precision": 0.8,
+            "confusion_matrix": np.array([[1, 0], [0, 1]]),
+        },
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "training.src.train",
+            "--train",
+            gold_data["train_path"],
+            "--val",
+            gold_data["val_path"],
+            "--test",
+            gold_data["test_path"],
+            "--session-split-map",
+            gold_data["split_map_path"],
+            "--smoke-mode",
+        ],
+    )
+
+    assert main() == 0
+
+    test_run = fake_mlflow.runs[-1]
+    logged_dicts = {args[1]: args[0] for args, _ in test_run["dicts"]}
+    assert logged_dicts["serving/feature_column_order.json"] == {
+        "columns": NUMERIC_FEATURE_COLUMNS + CATEGORICAL_FEATURE_COLUMNS
+    }
+    categorical_encoding = logged_dicts["serving/categorical_encoding.json"]
+    assert "category_maps" in categorical_encoding
+    assert categorical_encoding["missing_token"] == "__MISSING__"
+    assert categorical_encoding["unknown_token"] == "__UNK__"
+    assert logged_dicts["serving/threshold.json"] == {"optimal_threshold": 0.42}
+    assert logged_dicts["serving/prediction_contract.json"] == {
+        "prediction_horizon_minutes": 10,
+        "response_contract_version": "v1",
+    }
+    model_metadata = logged_dicts["serving/model_metadata.json"]
+    assert model_metadata["model_type"] == "catboost"
+    assert model_metadata["model_name"] == "catboost"
+    assert model_metadata["run_id"] == test_run["run_id"]
+    assert model_metadata["artifact_path"] == "serving/model"
+    assert model_metadata["artifact_file"] == "model.joblib"
+    assert model_metadata["load_flavor"] == "joblib"
+    assert model_metadata["probability_method"] == "predict_proba"
+    assert model_metadata["model_uri"] == (
+        f"runs:/{test_run['run_id']}/serving/model/model.joblib"
+    )
+    assert any(
+        kwargs.get("artifact_path") == "serving/model"
+        and str(args[0]).endswith("model.joblib")
+        for args, kwargs in test_run["artifacts"]
+    )
+
+
+def test_log_serving_bundle_requires_an_active_mlflow_run(monkeypatch):
+    fake_mlflow = _FakeMlflow()
+    monkeypatch.setattr("training.src.train.mlflow", fake_mlflow)
+
+    data = SimpleNamespace(
+        numeric_columns=list(NUMERIC_FEATURE_COLUMNS),
+        categorical_columns=list(CATEGORICAL_FEATURE_COLUMNS),
+        categorical_artifacts=SimpleNamespace(
+            category_maps={"category_id": {"cat-id": 0}},
+            missing_token="__MISSING__",
+            unknown_token="__UNK__",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="active MLflow run"):
+        _log_serving_bundle(
+            winner_name="catboost",
+            winner_model=_FakeModel(),
+            data=data,
+            winner_threshold=0.42,
+        )
