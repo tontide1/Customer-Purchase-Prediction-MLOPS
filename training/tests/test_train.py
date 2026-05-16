@@ -542,6 +542,73 @@ def test_auto_device_falls_back_to_cpu_when_gpu_fails(gold_data, monkeypatch):
     assert recorded_devices == ["gpu", "cpu"]
 
 
+def test_auto_device_falls_back_for_gpu_failure_message_in_non_runtime_error(
+    gold_data, monkeypatch
+):
+    fake_mlflow = _FakeMlflow()
+    monkeypatch.setattr("training.src.train.mlflow", fake_mlflow)
+    monkeypatch.setattr("training.src.train.OPTUNA_SMOKE_TRIALS", 1)
+    _stub_shap_hooks(monkeypatch, Path(gold_data["train_path"]).with_name("shap.png"))
+
+    calls = {"cat": 0}
+    recorded_devices: list[str] = []
+
+    def cat_train(*args, **kwargs):
+        calls["cat"] += 1
+        recorded_devices.append(kwargs["device"])
+        if calls["cat"] == 1:
+            raise ValueError("CUDA out of memory")
+        return _FakeModel(), {
+            "pr_auc": 0.8,
+            "average_precision": 0.8,
+            "confusion_matrix": np.array([[1, 0], [0, 1]]),
+        }
+
+    def ok_train(*args, **kwargs):
+        return _FakeModel(), {
+            "pr_auc": 0.8,
+            "average_precision": 0.8,
+            "confusion_matrix": np.array([[1, 0], [0, 1]]),
+        }
+
+    monkeypatch.setattr("training.src.train.train_catboost_candidate", cat_train)
+    monkeypatch.setattr("training.src.train.train_lightgbm_candidate", ok_train)
+    monkeypatch.setattr("training.src.train.train_xgboost_candidate", ok_train)
+    monkeypatch.setattr(
+        "training.src.train.evaluate_winner_on_test",
+        lambda *args, **kwargs: {
+            "pr_auc": 0.8,
+            "average_precision": 0.8,
+            "confusion_matrix": np.array([[1, 0], [0, 1]]),
+        },
+    )
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "training.src.train",
+            "--train",
+            gold_data["train_path"],
+            "--val",
+            gold_data["val_path"],
+            "--test",
+            gold_data["test_path"],
+            "--session-split-map",
+            gold_data["split_map_path"],
+            "--smoke-mode",
+            "--device",
+            "auto",
+            "--gpu-device-id",
+            "0",
+        ],
+    )
+
+    assert main() == 0
+    assert calls["cat"] == 2
+    assert recorded_devices == ["gpu", "cpu"]
+
+
 def test_main_logs_test_metrics_for_selected_winner(gold_data, monkeypatch, tmp_path):
     fake_mlflow = _FakeMlflow()
     monkeypatch.setattr("training.src.train.mlflow", fake_mlflow)

@@ -207,8 +207,8 @@ def _resolve_training_device(
     )
 
 
-def _is_gpu_training_error(exc: RuntimeError) -> bool:
-    """Return True when a RuntimeError looks like a GPU/device failure."""
+def _is_gpu_training_error(exc: Exception) -> bool:
+    """Return True when an exception looks like a GPU/device failure."""
 
     message = str(exc).lower()
     return any(
@@ -369,7 +369,7 @@ def _train_candidate_with_device_policy(
 
     try:
         return run("gpu")
-    except RuntimeError as exc:
+    except Exception as exc:
         if not _is_gpu_training_error(exc):
             raise
         logger.warning(
