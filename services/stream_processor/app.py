@@ -7,7 +7,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from services.stream_processor.db import ReplayEventStore
-from services.stream_processor.processor import STREAM_PROCESSOR_STATUS_FIELD, process_event
+from services.stream_processor.processor import (
+    STREAM_PROCESSOR_STATUS_FIELD,
+    process_event,
+)
 
 
 @dataclass(frozen=True)
@@ -36,7 +39,9 @@ class StreamProcessorSettings:
                 "postgresql://mlops:mlops@postgres:5432/mlops",
             ),
             session_ttl_seconds=int(source.get("SESSION_TTL_SECONDS", "1800")),
-            late_threshold_seconds=int(source.get("LATE_EVENT_THRESHOLD_SECONDS", "60")),
+            late_threshold_seconds=int(
+                source.get("LATE_EVENT_THRESHOLD_SECONDS", "60")
+            ),
             processing_guarantee=source.get("PROCESSING_GUARANTEE", "exactly-once"),
         )
 

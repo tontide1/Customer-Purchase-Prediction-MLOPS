@@ -1,2 +1,1 @@
 """Stream processor service package."""
-

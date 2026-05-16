@@ -30,7 +30,10 @@ def test_normalize_raw_row_renames_event_time_and_hashes_after_rename():
     assert event["replay_time"] == "2026-05-15T09:00:00"
     assert event["source"] == "replay"
     expected_payload = "session-1|2019-11-01T00:00:00|view|100|42"
-    assert event["event_id"] == hashlib.sha256(expected_payload.encode("utf-8")).hexdigest()
+    assert (
+        event["event_id"]
+        == hashlib.sha256(expected_payload.encode("utf-8")).hexdigest()
+    )
 
 
 def test_normalize_raw_row_rejects_missing_required_category_id():

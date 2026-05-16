@@ -55,7 +55,9 @@ def _session_duration_seconds(first_event_time: str, current_event_time: str) ->
     ).total_seconds()
 
 
-def apply_event_to_session_state(redis_client, event: dict[str, Any], *, ttl_seconds: int) -> None:
+def apply_event_to_session_state(
+    redis_client, event: dict[str, Any], *, ttl_seconds: int
+) -> None:
     session = event["user_session"]
     hash_key = f"session:{session}"
     products_key = f"{hash_key}:products"

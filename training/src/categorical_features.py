@@ -44,16 +44,20 @@ class CategoricalEncodingArtifacts:
 
 def prepare_training_frame(df: pd.DataFrame) -> TrainingFrame:
     """Select the model-ready columns from a gold dataframe."""
-    required_columns = set(NUMERIC_FEATURE_COLUMNS + CATEGORICAL_FEATURE_COLUMNS + [TARGET_COLUMN])
+    required_columns = set(
+        NUMERIC_FEATURE_COLUMNS + CATEGORICAL_FEATURE_COLUMNS + [TARGET_COLUMN]
+    )
     missing_columns = required_columns.difference(df.columns)
     if missing_columns:
         missing = ", ".join(sorted(missing_columns))
         raise ValueError(f"Missing required training columns: {missing}")
 
     features = df[NUMERIC_FEATURE_COLUMNS + CATEGORICAL_FEATURE_COLUMNS].copy()
-    features[NUMERIC_FEATURE_COLUMNS] = features[NUMERIC_FEATURE_COLUMNS].apply(
-        pd.to_numeric, errors="coerce"
-    ).fillna(0)
+    features[NUMERIC_FEATURE_COLUMNS] = (
+        features[NUMERIC_FEATURE_COLUMNS]
+        .apply(pd.to_numeric, errors="coerce")
+        .fillna(0)
+    )
     target = df[TARGET_COLUMN].astype(int).copy()
     return TrainingFrame(
         features=features,
@@ -81,7 +85,9 @@ def fit_categorical_encoders(train_df: pd.DataFrame) -> CategoricalEncodingArtif
             MISSING_CATEGORY_TOKEN: 0,
             UNKNOWN_CATEGORY_TOKEN: 1,
         }
-        category_map.update({value: index + 2 for index, value in enumerate(ordered_values)})
+        category_map.update(
+            {value: index + 2 for index, value in enumerate(ordered_values)}
+        )
         category_maps[column] = category_map
 
     return CategoricalEncodingArtifacts(category_maps=category_maps)

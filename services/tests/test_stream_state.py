@@ -147,7 +147,9 @@ def test_apply_event_initializes_hash_sets_ttl_and_invalidates_cache():
 def test_apply_event_updates_counts_preserves_first_event_and_normalizes_category_set():
     redis = FakeRedis()
 
-    apply_event_to_session_state(redis, _event(event_id="e1", event_type="view"), ttl_seconds=1800)
+    apply_event_to_session_state(
+        redis, _event(event_id="e1", event_type="view"), ttl_seconds=1800
+    )
     apply_event_to_session_state(
         redis,
         _event(
